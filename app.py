@@ -26,7 +26,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 # CONFIGURAÇÃO FIXA DA CHAVE DE API DO GEMINI
 # ---------------------------------------------------------
-API_KEY_REAL = "AQ.Ab8RN6J2Hzf0l8YUdlIeFgHzyDGMctvyQT0FOzMyj3hnxr73jA"
+API_KEY_REAL = "AQ.Ab8RN6JH8xPlqQuW1oz08gaZMr3GAblLDYoVuYIz3zHjY6609g"
 API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_GEMINI_AQUI" else os.environ.get("GEMINI_API_KEY", "")
 
 MESES_PT = {
