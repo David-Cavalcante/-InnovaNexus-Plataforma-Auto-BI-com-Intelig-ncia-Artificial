@@ -224,7 +224,7 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (BUSCA DINÂMICA ANTIBUG)
+# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (DIRETA E SEGURA)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
@@ -267,33 +267,22 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # OBTENÇÃO DINÂMICA DE MODELOS (À prova de falhas)
+        # Tentativa direta com o modelo otimizado
         try:
-            # Lista todos os modelos permitidos pela chave de API atual
-            modelos_disponiveis = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        except Exception as e:
-            return None, f"Falha ao validar a chave da API: {str(e)}"
-            
-        if not modelos_disponiveis:
-            return None, "A chave da API é válida, mas nenhum modelo de texto está disponível para esta conta."
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text, None
+        except Exception:
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text, None
 
-        # Testa os modelos dinamicamente um a um até um ter sucesso
-        ultimo_erro = ""
-        for modelo_nome in modelos_disponiveis:
-            try:
-                nome_limpo = modelo_nome.replace('models/', '') 
-                model = genai.GenerativeModel(nome_limpo)
-                response = model.generate_content(prompt)
-                if response and response.text:
-                    return response.text, None
-            except Exception as model_err:
-                ultimo_erro = str(model_err)
-                continue
-
-        return None, f"Não foi possível obter resposta de nenhum modelo. Último erro: {ultimo_erro}"
+        return None, "Não foi possível obter resposta do Gemini."
 
     except Exception as e:
-        return None, f"Erro ao inicializar o serviço do Gemini: {str(e)}"
+        return None, f"Erro na API do Gemini: {str(e)}"
 
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
