@@ -1,0 +1,12 @@
+streamlit>=1.30.0
+pandas>=2.0.0
+plotly>=5.18.0
+matplotlib>=3.8.0
+sqlalchemy>=2.0.0
+google-generativeai>=0.8.0
+fpdf2>=2.7.7
+python-dotenv>=1.0.0
+
+# comando para instalar libs = python -m pip install -r requirements.txt
+# comando para rodar app = python -m streamlit run app.py
+# comando para criar banco = python criar_banco.py
