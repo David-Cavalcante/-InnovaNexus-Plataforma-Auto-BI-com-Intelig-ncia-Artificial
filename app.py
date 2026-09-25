@@ -224,12 +224,11 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (COMPATÍVEL COM CHAVES AQ...)
+# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (ATUALIZADA PARA O NOVO MODELO)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
-        # Importação segura do novo client Google GenAI
         from google import genai
         
         client = genai.Client(api_key=api_key)
@@ -250,7 +249,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             "- Eficiência Operacional (Atraso Médio)\n"
             "- Eficiência de Pátio (Tempo de Detenção)\n"
             "- Variabilidade de Atraso (Desvio Padrão)\n"
-            "- Receita Potencial em Risk (Revenue-at-Risk)\n\n"
+            "- Receita Potencial em Risco (Revenue-at-Risk)\n\n"
             "---\n\n"
             "## 💡 2. Insights Estratégicos da Operação\n\n"
             "Inclua uma caixa de destaque (blockquote '>') com o Alerta Crítico apontando a taxa média de pontualidade real observada na base.\n\n"
@@ -270,30 +269,24 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # Chamada utilizando o novo padrão suportado por chaves AQ
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        
-        if response and response.text:
-            return response.text, None
+        # Tentativa com o modelo atualizado indicado pelo erro da API
+        erros_tentados = []
+        for modelo in ['gemini-3.8-flash', 'gemini-1.5-flash']:
+            try:
+                response = client.models.generate_content(
+                    model=modelo,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    return response.text, None
+            except Exception as ex:
+                erros_tentados.append(f"{modelo}: {str(ex)}")
+                continue
 
-        return None, "Não foi possível obter resposta do Gemini."
+        return None, f"Erro na API do Gemini. Detalhes: {' | '.join(erros_tentados)}"
 
     except Exception as e:
-        # Fallback de segurança para o modelo pro caso o flash não responda
-        try:
-            response_fb = client.models.generate_content(
-                model='gemini-pro',
-                contents=prompt,
-            )
-            if response_fb and response_fb.text:
-                return response_fb.text, None
-        except Exception as e2:
-            return None, f"Erro na API do Gemini (AQ Auth): {str(e)}"
-            
-        return None, f"Erro na API do Gemini: {str(e)}"
+        return None, f"Erro ao inicializar o client Gemini: {str(e)}"
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
 # ---------------------------------------------------------
