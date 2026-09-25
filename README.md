@@ -1,4 +1,4 @@
-# 🚀 InnovaNexus: Plataforma SaaS Auto-BI com Inteligência Artificial
+# 🚀 InnovaNexus: Insights & Dashboards com IA
 
 ## > **Projeto em Andamento — Desenvolvido para o Samsung Innovation Campus**  
 > *Plataforma inteligente para ingestão automatizada de dados (ETL), diagnósticos analíticos, pareceres prescritivos com IA (Google Gemini) e relatórios executivos dinâmicos.*
