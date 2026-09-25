@@ -1,13 +1,13 @@
 # 🚀 InnovaNexus: Plataforma SaaS Auto-BI com Inteligência Artificial
 
-> **Projeto em Andamento — Desenvolvido para o Samsung Innovation Campus**  
+## > **Projeto em Andamento — Desenvolvido para o Samsung Innovation Campus**  
 > *Plataforma inteligente para ingestão automatizada de dados (ETL), diagnósticos analíticos, pareceres prescritivos com IA (Google Gemini) e relatórios executivos dinâmicos.*
-📌 Sobre o Projeto
+# 📌 Sobre o Projeto
 O InnovaNexus é uma solução corporativa de Business Intelligence as a Service (BIaaS) projetada para democratizar a análise de dados. A plataforma elimina barreiras técnicas ao automatizar todo o pipeline de engenharia de dados (ETL), permitindo que gestores e analistas transformem bases brutas (CSV ou Bancos de Dados SQL) em painéis interativos e relatórios executivos gerados por Inteligência Artificial em segundos.
 
 Este projeto está em desenvolvimento ativo como parte da entrega para o Samsung Innovation Campus, refletindo padrões modernos de arquitetura de software, engenharia de dados e integração com LLMs de última geração.
 
-🛠️ Arquitetura & Stack Tecnológica
+# 🛠️ Arquitetura & Stack Tecnológica
 O ecossistema do InnovaNexus foi construído com tecnologias robustas e de alto desempenho:
 
 Interface & Web Framework: Streamlit (Arquitetura reativa e multi-abas com painéis interativos).
@@ -20,12 +20,12 @@ Visualização Gráfica: Plotly Express (Dashboards interativos) e Matplotlib (B
 
 Exportação Corporativa: FPDF2 (Geração automatizada de relatórios executivos em PDF com sanitização de caracteres e inserção de gráficos).
 
-✨ Principais Funcionalidades
-🔐 Portal de Acesso Executivo: Sistema de autenticação integrado com controle de sessão.
+## ✨ Principais Funcionalidades
+## 🔐 Portal de Acesso Executivo: Sistema de autenticação integrado com controle de sessão.
 
 🔌 Conectividade Agnóstica: Suporte a arquivos CSV com tratamento de aspas e formatações irregulares, além de conexão nativa com bancos de dados relacionais (SQLite, PostgreSQL, MySQL).
 
-⚙️ Pipeline de ETL Automatizado:
+## ⚙️ Pipeline de ETL Automatizado:
 
 Limpeza de duplicatas e padronização de strings.
 
@@ -33,9 +33,9 @@ Detecção e conversão automática de colunas temporais (com suporte a localiza
 
 Engenharia de recursos nativa (cálculo automático de atrasos em minutos, métricas de pontualidade e tratamento inteligente de valores ausentes).
 
-🔬 Diagnóstico Técnico: Visão estrutural detalhada com matriz de tipos de dados, contagem de nulos e resumo estatístico descritivo.
+## 🔬 Diagnóstico Técnico: Visão estrutural detalhada com matriz de tipos de dados, contagem de nulos e resumo estatístico descritivo.
 
-🤖 InnovaNexus AI (Parecer Prescritivo): Análise contextual profunda realizada pelo Gemini, estruturando diagnósticos de negócio, tabelas de KPIs e planos de ação práticos baseados no Princípio de Pareto.
+## 🤖 InnovaNexus AI (Parecer Prescritivo): Análise contextual profunda realizada pelo Gemini, estruturando diagnósticos de negócio, tabelas de KPIs e planos de ação práticos baseados no Princípio de Pareto.
 
 📊 Dashboard Interativo Dinâmico: Filtros customizáveis, seleções de métricas numéricas e categóricas (Eixo X/Y), gráficos de barras, pizza, dispersão e séries temporais.
 
@@ -44,7 +44,7 @@ Engenharia de recursos nativa (cálculo automático de atrasos em minutos, métr
 ⚙️ Como Executar o Projeto Localmente
 Siga os passos abaixo para configurar e rodar a aplicação no seu ambiente de desenvolvimento:
 
-1. Clonar o Repositório
+## 1. Clonar o Repositório
 Bash
 git clone [https://github.com/seu-usuario/InnovaNexus.git](https://github.com/seu-usuario/InnovaNexus.git)
 cd InnovaNexus
@@ -81,7 +81,7 @@ Senha: 1234
 
 [ ] Implementação de novas fontes de dados em nuvem (Em desenvolvimento)
 
-👤 Autor
-Desenvolvido por David Cavalcante
+# 👤 Autor
+## Desenvolvido por David Cavalcante
 
 Projeto acadêmico e profissional desenvolvido no âmbito do programa Samsung Innovation Campus.
