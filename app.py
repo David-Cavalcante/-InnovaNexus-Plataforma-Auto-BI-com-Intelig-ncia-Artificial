@@ -224,11 +224,12 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (DIRETA E SEGURA)
+# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (COMPATÍVEL COM TOKENS AQ...)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
+        # Configuração adaptada para chaves de projeto Google Cloud (AQ...)
         genai.configure(api_key=api_key)
         
         prompt = (
@@ -267,21 +268,25 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # Tentativa direta com o modelo otimizado
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt)
-            if response and response.text:
-                return response.text, None
-        except Exception:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(prompt)
-            if response and response.text:
-                return response.text, None
+        # Como o token é de projeto Google Cloud (AQ...), especificamos o modelo padrão de forma explícita
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        
+        if response and response.text:
+            return response.text, None
 
         return None, "Não foi possível obter resposta do Gemini."
 
     except Exception as e:
+        # Se falhar com o flash, tenta uma rotação limpa com o pro
+        try:
+            model_fallback = genai.GenerativeModel('gemini-1.5-pro')
+            response_fb = model_fallback.generate_content(prompt)
+            if response_fb and response_fb.text:
+                return response_fb.text, None
+        except Exception as e2:
+            return None, f"Erro de autenticação/API: {str(e)}"
+        
         return None, f"Erro na API do Gemini: {str(e)}"
 
 # ---------------------------------------------------------
