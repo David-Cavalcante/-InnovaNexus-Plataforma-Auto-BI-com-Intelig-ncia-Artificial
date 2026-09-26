@@ -225,7 +225,7 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM IA VIA GROQ
+# FUNÇÃO DE INTEGRAÇÃO COM IA VIA GROQ (SELEÇÃO DINÂMICA DE MODELOS)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_groq(api_key, df_info_str, df_describe_str, df_head_str):
@@ -234,6 +234,30 @@ def gerar_insights_groq(api_key, df_info_str, df_describe_str, df_head_str):
             api_key=api_key.strip(),
             base_url="https://api.groq.com/openai/v1"
         )
+        
+        # 1. BUSCA DINÂMICA: Verifica os modelos exatos que a sua chave tem autorização
+        try:
+            modelos_disponiveis = [m.id for m in client.models.list().data]
+            # Filtra apenas os modelos de texto (exclui modelos de áudio como o 'whisper')
+            modelos_texto = [m for m in modelos_disponiveis if "whisper" not in m.lower()]
+            
+            if not modelos_texto:
+                return None, "A sua chave não possui permissão para aceder a nenhum modelo de texto na Groq."
+            
+            # Escolhe o melhor modelo disponível ou o primeiro da lista autorizada
+            modelo_escolhido = modelos_texto[0]
+            modelos_prioridade = [
+                "llama-3.3-70b-versatile", 
+                "llama-3.1-8b-instant", 
+                "mixtral-8x7b-32768", 
+                "gemma2-9b-it"
+            ]
+            for pref in modelos_prioridade:
+                if pref in modelos_disponiveis:
+                    modelo_escolhido = pref
+                    break
+        except Exception as e_mod:
+            return None, f"Erro ao verificar modelos disponíveis na conta: {str(e_mod)}"
         
         prompt = (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
@@ -272,7 +296,7 @@ def gerar_insights_groq(api_key, df_info_str, df_describe_str, df_head_str):
         )
         
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=modelo_escolhido,
             messages=[
                 {"role": "system", "content": "Você é um analista de dados executivo sênior."},
                 {"role": "user", "content": prompt}
