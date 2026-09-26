@@ -24,10 +24,10 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CONFIGURAÇÃO DA CHAVE DE API DA IA (DEEPSEEK)
+# CONFIGURAÇÃO DA CHAVE DE API DA IA (GROQ)
 # ---------------------------------------------------------
-API_KEY_REAL = "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"
-API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_AQUI" else os.environ.get("DEEPSEEK_API_KEY", "")
+API_KEY_REAL = "sk-5ca9acdb136c43c9b04a51012761c4f7"
+API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_AQUI" else os.environ.get("GROQ_API_KEY", "")
 
 MESES_PT = {
     'January': 'Janeiro', 'February': 'Fevereiro', 'March': 'Março',
@@ -224,7 +224,7 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM IA VIA GROQ (GRATUITO & COMPATÍVEL COM OPENAI)
+# FUNÇÃO DE INTEGRAÇÃO COM IA VIA GROQ
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
@@ -271,7 +271,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
         )
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Modelo de alta performance gratuito na Groq
+            model="llama3-8b-8192",
             messages=[
                 {"role": "system", "content": "Você é um analista de dados executivo sênior."},
                 {"role": "user", "content": prompt}
@@ -315,7 +315,7 @@ else:
 
     st.sidebar.header("👤 Sessão do Utilizador")
     st.sidebar.write("Conectado como: **Administrador**")
-    st.sidebar.success("🤖 Motor de IA (DeepSeek): **Ativo**")
+    st.sidebar.success("🤖 Motor de IA (Groq): **Ativo**")
 
     if st.sidebar.button("Sair (Logout)"):
         realizar_logout()
