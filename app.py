@@ -224,12 +224,15 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (ESTÁVEL E COMPATÍVEL COM SDK CLÁSSICO)
+# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (COMPATÍVEL COM CHAVES AQ... / VERTEX AI)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
-        genai.configure(api_key=api_key)
+        from google import genai
+        
+        # Inicializa o client moderno compatível com tokens de projeto AQ...
+        client = genai.Client(api_key=api_key)
         
         prompt = (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
@@ -251,7 +254,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             "---\n\n"
             "## 💡 2. Insights Estratégicos da Operação\n\n"
             "Inclua uma caixa de destaque (blockquote '>') com o Alerta Crítico apontando a taxa média de pontualidade real observada na base.\n\n"
-            "Destaque em subseções numeradas os 3 diagnósticos principales:\n"
+            "Destaque em subseções numeradas os 3 diagnósticos principais:\n"
             "1. **Crise de Pontualidade:** Análise da porcentagem de entregas no prazo e o impacto na satisfação do cliente.\n"
             "2. **Gargalos de Carga e Descarga:** Análise do tempo médio de detenção (minutos_detencao) e picos de retenção.\n"
             "3. **Alta Volatilidade Operacional:** Análise do desvio padrão dos atrasos (atraso_real_minutos) e oscilações da malha.\n\n"
@@ -267,20 +270,30 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # Tentativa segura com os modelos padrão estáveis do SDK clássico
-        for modelo_nome in ['gemini-1.5-flash', 'gemini-pro']:
-            try:
-                model = genai.GenerativeModel(modelo_nome)
-                response = model.generate_content(prompt)
-                if response and response.text:
-                    return response.text, None
-            except Exception:
-                continue
+        # Tentativa utilizando o modelo padrão otimizado para o SDK moderno
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        
+        if response and response.text:
+            return response.text, None
 
-        return None, "Não foi possível obter resposta dos modelos do Gemini disponíveis para esta chave."
+        return None, "Não foi possível obter resposta do Gemini."
 
     except Exception as e:
-        return None, f"Erro ao inicializar o Gemini: {str(e)}"
+        # Fallback de segurança caso o flash principal oscile
+        try:
+            response_fb = client.models.generate_content(
+                model='gemini-pro',
+                contents=prompt,
+            )
+            if response_fb and response_fb.text:
+                return response_fb.text, None
+        except Exception as e2:
+            return None, f"Erro na API do Gemini (Token Cloud): {str(e)}"
+            
+        return None, f"Erro na API do Gemini: {str(e)}"
 
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
