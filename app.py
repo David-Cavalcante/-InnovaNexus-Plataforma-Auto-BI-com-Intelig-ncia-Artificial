@@ -26,8 +26,9 @@ st.set_page_config(
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA CHAVE DE API DA IA (GROQ)
 # ---------------------------------------------------------
-API_KEY_REAL = "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"
-API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_AQUI" else os.environ.get("GROQ_API_KEY", "")
+# Cole a sua nova chave da Groq (que começa com gsk_) abaixo:
+API_KEY_REAL = "gsk_COLE_SUA_CHAVE_GROQ_AQUI"
+API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "gsk_COLE_SUA_CHAVE_GROQ_AQUI" else os.environ.get("GROQ_API_KEY", "")
 
 MESES_PT = {
     'January': 'Janeiro', 'February': 'Fevereiro', 'March': 'Março',
@@ -227,7 +228,7 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
 # FUNÇÃO DE INTEGRAÇÃO COM IA VIA GROQ
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
-def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
+def gerar_insights_groq(api_key, df_info_str, df_describe_str, df_head_str):
     try:
         client = OpenAI(
             api_key=api_key.strip(),
@@ -271,7 +272,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
         )
         
         response = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": "Você é um analista de dados executivo sênior."},
                 {"role": "user", "content": prompt}
@@ -430,7 +431,7 @@ else:
             st.subheader("🧠 Parecer Executivo Automático (InnovaNexus AI)")
 
             if not API_KEY_INTERNA:
-                st.error("⚠️ Nenhuma Chave de API foi configurada no sistema.")
+                st.error("⚠️ Nenhuma Chave de API da Groq foi configurada no sistema.")
             else:
                 btn_gerar_ia = st.button("✨ Gerar Parecer & Insights Prescritivos")
 
@@ -440,7 +441,7 @@ else:
                         describe_str = df.describe().T.to_string() if not df.select_dtypes(include=['number']).empty else "Nenhuma variável numérica."
                         head_str = df.head(5).to_string(index=False)
 
-                        insights, erro_ia = gerar_insights_gemini(API_KEY_INTERNA.strip(), info_str, describe_str, head_str)
+                        insights, erro_ia = gerar_insights_groq(API_KEY_INTERNA.strip(), info_str, describe_str, head_str)
 
                         if erro_ia:
                             st.error(f"Erro ao gerar parecer com a IA: {erro_ia}")
