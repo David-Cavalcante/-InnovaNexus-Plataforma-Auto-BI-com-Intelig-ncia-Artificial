@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import requests
+import json
 
 # Configuração do backend 'Agg' do Matplotlib antes de importar o pyplot (obrigatório para ambientes como o Streamlit)
 import matplotlib
@@ -223,17 +225,15 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
     except Exception as e:
         return None, str(e)
 
+import requests
+import json
+
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (COMPATÍVEL COM CHAVES AQ... / VERTEX AI)
+# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI VIA REST API (COMPATÍVEL COM TOKENS AQ...)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
-        from google import genai
-        
-        # Inicializa o client moderno compatível com tokens de projeto AQ...
-        client = genai.Client(api_key=api_key)
-        
         prompt = (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
             "Analise a estrutura de dados fornecida abaixo e gere um parecer estruturado estritamente em Português do Brasil de alto nível executivo e estratégico.\n\n"
@@ -270,30 +270,33 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # Tentativa utilizando o modelo padrão otimizado para o SDK moderno
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
+        # URL da API REST oficial do Gemini com suporte a tokens de projeto Cloud (AQ...)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key.strip()}"
         
-        if response and response.text:
-            return response.text, None
-
-        return None, "Não foi possível obter resposta do Gemini."
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        }
+        
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        
+        if response.status_code == 200:
+            resultado_json = response.json()
+            try:
+                texto_gerado = resultado_json['candidates'][0]['content']['parts'][0]['text']
+                return texto_gerado, None
+            except (KeyError, IndexError):
+                return None, "A resposta da API veio vazia ou em formato inesperado."
+        else:
+            return None, f"Erro HTTP {response.status_code}: {response.text}"
 
     except Exception as e:
-        # Fallback de segurança caso o flash principal oscile
-        try:
-            response_fb = client.models.generate_content(
-                model='gemini-pro',
-                contents=prompt,
-            )
-            if response_fb and response_fb.text:
-                return response_fb.text, None
-        except Exception as e2:
-            return None, f"Erro na API do Gemini (Token Cloud): {str(e)}"
-            
-        return None, f"Erro na API do Gemini: {str(e)}"
+        return None, f"Erro ao comunicar com a API REST: {str(e)}"
 
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
