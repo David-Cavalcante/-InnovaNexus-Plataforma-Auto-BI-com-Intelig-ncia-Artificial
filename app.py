@@ -224,14 +224,12 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (ATUALIZADA PARA O NOVO MODELO)
+# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI (ESTÁVEL E COMPATÍVEL COM SDK CLÁSSICO)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
-        from google import genai
-        
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
         
         prompt = (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
@@ -253,7 +251,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             "---\n\n"
             "## 💡 2. Insights Estratégicos da Operação\n\n"
             "Inclua uma caixa de destaque (blockquote '>') com o Alerta Crítico apontando a taxa média de pontualidade real observada na base.\n\n"
-            "Destaque em subseções numeradas os 3 diagnósticos principais:\n"
+            "Destaque em subseções numeradas os 3 diagnósticos principales:\n"
             "1. **Crise de Pontualidade:** Análise da porcentagem de entregas no prazo e o impacto na satisfação do cliente.\n"
             "2. **Gargalos de Carga e Descarga:** Análise do tempo médio de detenção (minutos_detencao) e picos de retenção.\n"
             "3. **Alta Volatilidade Operacional:** Análise do desvio padrão dos atrasos (atraso_real_minutos) e oscilações da malha.\n\n"
@@ -269,24 +267,21 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # Tentativa com o modelo atualizado indicado pelo erro da API
-        erros_tentados = []
-        for modelo in ['gemini-3.8-flash', 'gemini-1.5-flash']:
+        # Tentativa segura com os modelos padrão estáveis do SDK clássico
+        for modelo_nome in ['gemini-1.5-flash', 'gemini-pro']:
             try:
-                response = client.models.generate_content(
-                    model=modelo,
-                    contents=prompt,
-                )
+                model = genai.GenerativeModel(modelo_nome)
+                response = model.generate_content(prompt)
                 if response and response.text:
                     return response.text, None
-            except Exception as ex:
-                erros_tentados.append(f"{modelo}: {str(ex)}")
+            except Exception:
                 continue
 
-        return None, f"Erro na API do Gemini. Detalhes: {' | '.join(erros_tentados)}"
+        return None, "Não foi possível obter resposta dos modelos do Gemini disponíveis para esta chave."
 
     except Exception as e:
-        return None, f"Erro ao inicializar o client Gemini: {str(e)}"
+        return None, f"Erro ao inicializar o Gemini: {str(e)}"
+
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
 # ---------------------------------------------------------
