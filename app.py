@@ -26,7 +26,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA CHAVE DE API DA IA (DEEPSEEK)
 # ---------------------------------------------------------
-API_KEY_REAL = "sk-5ca9acdb136c43c9b04a51012761c4f7"
+API_KEY_REAL = "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"
 API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_AQUI" else os.environ.get("DEEPSEEK_API_KEY", "")
 
 MESES_PT = {
@@ -224,14 +224,14 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM IA VIA DEEPSEEK
+# FUNÇÃO DE INTEGRAÇÃO COM IA VIA GROQ (GRATUITO & COMPATÍVEL COM OPENAI)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
         client = OpenAI(
             api_key=api_key.strip(),
-            base_url="https://api.deepseek.com"
+            base_url="https://api.groq.com/openai/v1"
         )
         
         prompt = (
@@ -271,7 +271,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
         )
         
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="llama-3.3-70b-versatile",  # Modelo de alta performance gratuito na Groq
             messages=[
                 {"role": "system", "content": "Você é um analista de dados executivo sênior."},
                 {"role": "user", "content": prompt}
@@ -285,7 +285,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
         return None, "Não foi possível obter resposta da IA."
 
     except Exception as e:
-        return None, f"Erro ao comunicar com a API do DeepSeek: {str(e)}"
+        return None, f"Erro ao comunicar com a API da Groq: {str(e)}"
 
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
