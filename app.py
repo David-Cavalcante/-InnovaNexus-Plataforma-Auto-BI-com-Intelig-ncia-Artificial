@@ -1,9 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import requests
-import json
-from openai import OpenAI
 
 # Configuração do backend 'Agg' do Matplotlib antes de importar o pyplot (obrigatório para ambientes como o Streamlit)
 import matplotlib
@@ -11,7 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from sqlalchemy import create_engine
-import google.generativeai as genai
+from openai import OpenAI
 from io import StringIO
 import os
 import tempfile
@@ -27,10 +24,10 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CONFIGURAÇÃO FIXA DA CHAVE DE API DO GEMINI
+# CONFIGURAÇÃO DA CHAVE DE API DA IA (DEEPSEEK)
 # ---------------------------------------------------------
 API_KEY_REAL = "sk-5ca9acdb136c43c9b04a51012761c4f7"
-API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_GEMINI_AQUI" else os.environ.get("GEMINI_API_KEY", "")
+API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_AQUI" else os.environ.get("DEEPSEEK_API_KEY", "")
 
 MESES_PT = {
     'January': 'Janeiro', 'February': 'Fevereiro', 'March': 'Março',
@@ -227,12 +224,11 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM IA VIA DEEPSEEK (COMPATÍVEL COM OPENAI)
+# FUNÇÃO DE INTEGRAÇÃO COM IA VIA DEEPSEEK
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
-        # Configura o cliente apontando para a API do DeepSeek
         client = OpenAI(
             api_key=api_key.strip(),
             base_url="https://api.deepseek.com"
@@ -275,7 +271,7 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
         )
         
         response = client.chat.completions.create(
-            model="deepseek-chat",  # Utiliza o modelo padrão de chat do DeepSeek (V3)
+            model="deepseek-chat",
             messages=[
                 {"role": "system", "content": "Você é um analista de dados executivo sênior."},
                 {"role": "user", "content": prompt}
@@ -289,7 +285,8 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
         return None, "Não foi possível obter resposta da IA."
 
     except Exception as e:
-        return None, f"Erro ao comunicar com a API da IA: {str(e)}"
+        return None, f"Erro ao comunicar com a API do DeepSeek: {str(e)}"
+
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
 # ---------------------------------------------------------
@@ -318,7 +315,7 @@ else:
 
     st.sidebar.header("👤 Sessão do Utilizador")
     st.sidebar.write("Conectado como: **Administrador**")
-    st.sidebar.success("🤖 Motor de IA (Gemini): **Ativo**")
+    st.sidebar.success("🤖 Motor de IA (DeepSeek): **Ativo**")
 
     if st.sidebar.button("Sair (Logout)"):
         realizar_logout()
@@ -433,7 +430,7 @@ else:
             st.subheader("🧠 Parecer Executivo Automático (InnovaNexus AI)")
 
             if not API_KEY_INTERNA:
-                st.error("⚠️ Nenhuma Chave de API do Gemini foi configurada no sistema.")
+                st.error("⚠️ Nenhuma Chave de API foi configurada no sistema.")
             else:
                 btn_gerar_ia = st.button("✨ Gerar Parecer & Insights Prescritivos")
 
