@@ -5,6 +5,7 @@ matplotlib
 sqlalchemy
 fpdf2
 google-generativeai
+google-genai
 
 # comando para instalar libs = python -m pip install -r requirements.txt
 # comando para rodar app = python -m streamlit run app.py
