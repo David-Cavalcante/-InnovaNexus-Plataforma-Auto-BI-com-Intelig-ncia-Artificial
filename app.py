@@ -26,7 +26,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DA CHAVE DE API DA IA (GROQ)
 # ---------------------------------------------------------
-API_KEY_REAL = "sk-5ca9acdb136c43c9b04a51012761c4f7"
+API_KEY_REAL = "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"
 API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_AQUI" else os.environ.get("GROQ_API_KEY", "")
 
 MESES_PT = {
