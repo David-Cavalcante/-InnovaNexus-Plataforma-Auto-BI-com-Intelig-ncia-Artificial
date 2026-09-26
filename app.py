@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 import json
+from openai import OpenAI
 
 # Configuração do backend 'Agg' do Matplotlib antes de importar o pyplot (obrigatório para ambientes como o Streamlit)
 import matplotlib
@@ -28,7 +29,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 # CONFIGURAÇÃO FIXA DA CHAVE DE API DO GEMINI
 # ---------------------------------------------------------
-API_KEY_REAL = "AQ.Ab8RN6KBBpXeaoEdlZiQfHMlw-pVSwoMa20xmYiNhZkujkZASQ"
+API_KEY_REAL = "sk-5ca9acdb136c43c9b04a51012761c4f7"
 API_KEY_INTERNA = API_KEY_REAL if API_KEY_REAL != "COLE_SUA_CHAVE_GEMINI_AQUI" else os.environ.get("GEMINI_API_KEY", "")
 
 MESES_PT = {
@@ -225,15 +226,18 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
     except Exception as e:
         return None, str(e)
 
-import requests
-import json
-
 # ---------------------------------------------------------
-# FUNÇÃO DE INTEGRAÇÃO COM GEMINI AI VIA REST API (COMPATÍVEL COM TOKENS AQ...)
+# FUNÇÃO DE INTEGRAÇÃO COM IA VIA DEEPSEEK (COMPATÍVEL COM OPENAI)
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
     try:
+        # Configura o cliente apontando para a API do DeepSeek
+        client = OpenAI(
+            api_key=api_key.strip(),
+            base_url="https://api.deepseek.com"
+        )
+        
         prompt = (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
             "Analise a estrutura de dados fornecida abaixo e gere um parecer estruturado estritamente em Português do Brasil de alto nível executivo e estratégico.\n\n"
@@ -270,34 +274,22 @@ def gerar_insights_gemini(api_key, df_info_str, df_describe_str, df_head_str):
             f"Amostra da Base:\n{df_head_str}\n"
         )
         
-        # URL da API REST oficial do Gemini com suporte a tokens de projeto Cloud (AQ...)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key.strip()}"
+        response = client.chat.completions.create(
+            model="deepseek-chat",  # Utiliza o modelo padrão de chat do DeepSeek (V3)
+            messages=[
+                {"role": "system", "content": "Você é um analista de dados executivo sênior."},
+                {"role": "user", "content": prompt}
+            ],
+            stream=False
+        )
         
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
-        
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
-        
-        if response.status_code == 200:
-            resultado_json = response.json()
-            try:
-                texto_gerado = resultado_json['candidates'][0]['content']['parts'][0]['text']
-                return texto_gerado, None
-            except (KeyError, IndexError):
-                return None, "A resposta da API veio vazia ou em formato inesperado."
-        else:
-            return None, f"Erro HTTP {response.status_code}: {response.text}"
+        if response and response.choices:
+            return response.choices[0].message.content, None
+
+        return None, "Não foi possível obter resposta da IA."
 
     except Exception as e:
-        return None, f"Erro ao comunicar com a API REST: {str(e)}"
-
+        return None, f"Erro ao comunicar com a API da IA: {str(e)}"
 # ---------------------------------------------------------
 # TELA DE LOGIN (QUANDO NÃO AUTENTICADO)
 # ---------------------------------------------------------
