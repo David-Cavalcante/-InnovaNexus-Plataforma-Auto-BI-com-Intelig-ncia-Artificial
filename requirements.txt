@@ -5,7 +5,6 @@ matplotlib
 sqlalchemy
 fpdf2
 openai
-requests
 
 # comando para instalar libs = python -m pip install -r requirements.txt
 # comando para rodar app = python -m streamlit run app.py
