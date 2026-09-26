@@ -4,7 +4,6 @@ plotly
 matplotlib
 sqlalchemy
 fpdf2
-google-genai
 google-generativeai
 
 # comando para instalar libs = python -m pip install -r requirements.txt
