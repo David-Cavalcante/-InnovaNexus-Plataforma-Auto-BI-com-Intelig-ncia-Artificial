@@ -1,10 +1,17 @@
-streamlit
-pandas
-plotly
-matplotlib
-sqlalchemy
-fpdf2
-openai
+streamlit>=1.35.0
+pandas>=2.0.0
+plotly>=5.20.0
+requests>=2.31.0
+openai>=1.30.0
+sqlalchemy>=2.0.0
+fpdf2>=2.7.9
+matplotlib>=3.8.0
+numpy>=1.26.0
+psycopg2-binary>=2.9.9
+pymysql>=1.1.0
+statsmodels>=0.14.0
+google-genai>=2.3.0
+
 
 # comando para instalar libs = python -m pip install -r requirements.txt
 # comando para rodar app = python -m streamlit run app.py
