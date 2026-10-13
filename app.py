@@ -19,6 +19,15 @@ import tempfile
 from fpdf import FPDF
 import numpy as np
 
+from data_science import (
+    formatar_valor,
+    calcular_estatisticas_resumo,
+    classificar_quartis_outliers,
+    treinar_regressao_linear,
+    executar_previsao_temporal,
+    executar_regressao_bivariada
+)
+
 # ---------------------------------------------------------
 # CONFIGURAÇÃO DE PÁGINA
 # ---------------------------------------------------------
@@ -49,14 +58,12 @@ st.markdown("""
 #
 #   Groq    → https://console.groq.com/keys          (começa com "gsk_")
 #   Gemini  → https://aistudio.google.com/apikey     (começa com "AIza")
-#   DeepSeek→ https://platform.deepseek.com/         (começa com "sk-")
 #
 # Deixe o campo vazio ("") para forçar o utilizador a inserir a chave na sidebar.
 # ---------------------------------------------------------
 CHAVES_PADRAO = {
     "Groq (Rápido/Gratuito)": "",   # ← Cole aqui sua chave Groq  (gsk_...)
     "Gemini (Google)":         "",   # ← Cole aqui sua chave Gemini (AIza...)
-    "DeepSeek (Avançado)":     "",   # ← Cole aqui sua chave DeepSeek (sk-...)
 }
 
 MESES_PT = {
@@ -244,20 +251,19 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
 # ---------------------------------------------------------
 # INTEGRAÇÃO COM IA MULTIMOTOR — VERSÃO CORRIGIDA
 # ---------------------------------------------------------
-def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str):
+def construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_analise="Automático (Geral)", pergunta_usuario=""):
     """
-    Gera insights via IA usando o motor selecionado.
-
-    Correções aplicadas:
-    - Groq: modelo atualizado para 'llama-3.3-70b-versatile' (llama3-8b-8192 foi descontinuado)
-    - Gemini: usa REST API com modelo 'gemini-1.5-flash' via endpoint público
-    - DeepSeek: tratamento de erros melhorado
+    Constrói o prompt enviado aos modelos de IA.
+    Suporta tanto a análise padrão executiva (automática) quanto análises sob demanda
+    com perguntas pontuais e objetivos específicos definidos pelo usuário.
     """
-    try:
-        info_safe    = df_info_str[:1500]
-        desc_safe    = df_describe_str[:2500]
-        head_safe    = df_head_str[:1200]
+    info_safe = df_info_str[:1500]
+    desc_safe = df_describe_str[:2500]
+    head_safe = df_head_str[:1200]
 
+    eh_sob_demanda = bool(pergunta_usuario and pergunta_usuario.strip()) or (tipo_analise and tipo_analise != "Automático (Geral)")
+
+    if not eh_sob_demanda:
         prompt = (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
             "Analise a estrutura de dados fornecida abaixo e gere um parecer estruturado "
@@ -282,24 +288,93 @@ def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str)
             f"Resumo Estatístico:\n{desc_safe}\n\n"
             f"Amostra de Dados:\n{head_safe}\n"
         )
+    else:
+        foco_tipo = f"- **Foco da Análise Solicitada:** {tipo_analise}\n" if tipo_analise and tipo_analise != "Automático (Geral)" else ""
+        foco_pergunta = f"- **Pergunta / Insight Específico Desejado:** {pergunta_usuario.strip()}\n" if pergunta_usuario and pergunta_usuario.strip() else ""
 
-        system_msg = "Você é um analista de dados sênior especialista em business intelligence."
+        prompt = (
+            "Atue como um Especialista em Ciência de Dados, Analytics e Inteligência de Negócios.\n"
+            "O usuário solicitou uma ANÁLISE SOB DEMANDA específica sobre o dataset enviado.\n"
+            "Sua resposta deve ser gerada estritamente a partir dos dados fornecidos e refletir com precisão o que foi solicitado.\n\n"
+            "### SOLICITAÇÃO DO USUÁRIO:\n"
+            f"{foco_tipo}"
+            f"{foco_pergunta}\n"
+            "Siga exatamente a seguinte estrutura e estilo em Markdown:\n\n"
+            f"# InnovaNexus - Análise Sob Demanda: {tipo_analise if tipo_analise != 'Automático (Geral)' else 'Consulta Personalizada'}\n"
+            "*Relatório Analítico Específico baseado nos Dados do Dataset*\n\n"
+            "---\n\n"
+            "> **🎯 Objetivo da Solicitação:** Responder diretamente à questão/demanda do usuário com base nos dados reais.\n\n"
+            "---\n\n"
+            "## 📌 1. Resposta Direta & Diagnóstico da Pergunta Solicitada\n\n"
+            "Responda diretamente com dados, métricas e cálculos extraídos da base fornecida.\n\n"
+            "---\n\n"
+            "## 📊 2. Evidências dos Dados & Indicadores Relevantes\n\n"
+            "Apresente tabela markdown ou lista de indicadores que fundamentam a resposta.\n\n"
+            "---\n\n"
+            "## 🚀 3. Insights Estratégicos & Recomendações Acionáveis\n\n"
+            "Forneça conclusões práticas e prescritivas para o negócio a partir dos achados.\n\n"
+            "--- DADOS PARA ANÁLISE ---\n"
+            f"Tipos de Colunas:\n{info_safe}\n\n"
+            f"Resumo Estatístico:\n{desc_safe}\n\n"
+            f"Amostra de Dados:\n{head_safe}\n"
+        )
+    return prompt
+
+def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str, tipo_analise="Automático (Geral)", pergunta_usuario=""):
+    """
+    Gera insights via IA usando o motor selecionado.
+    Suporta análise padrão automática e análise sob demanda (tipo de análise e pergunta específica).
+    """
+    try:
+        prompt = construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_analise, pergunta_usuario)
+        system_msg = "Você é um analista de dados sênior especialista em business intelligence e ciência de dados."
 
         # ── 1. MOTOR GROQ ─────────────────────────────────────────────────────
         if motor == "Groq (Rápido/Gratuito)":
-            # Modelos ativos na Groq em 2025 (em ordem de preferência)
-            # Fonte: https://console.groq.com/docs/models
-            modelos_groq = [
-                "llama-3.3-70b-versatile",      # Llama 3.3 — recomendado
-                "llama-3.1-8b-instant",         # Llama 3.1 rápido
-                "llama3-8b-8192",               # Llama 3 clássico
-                "gemma2-9b-it",                 # Google Gemma 2
-                "mixtral-8x7b-32768",           # Mixtral (pode estar descontinuado)
-            ]
+            key_groq = api_key.strip()
+            if not key_groq:
+                return None, (
+                    "🔑 Chave Groq não configurada.\n\n"
+                    "Obtenha uma chave gratuita em https://console.groq.com/keys "
+                    "e insira-a no campo 'Chave de API' no painel lateral."
+                )
+
             client = OpenAI(
-                api_key=api_key.strip(),
+                api_key=key_groq,
                 base_url="https://api.groq.com/openai/v1"
             )
+
+            # Modelos ativos recomendados na Groq
+            # (llama-3.1-8b-instant tem excelente estabilidade e maior cota no plano gratuito)
+            modelos_preferenciais = [
+                "llama-3.1-8b-instant",
+                "llama-3.3-70b-versatile",
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "qwen/qwen3.8-27b",
+            ]
+
+            modelos_groq = []
+            try:
+                # Consulta dinamicamente os modelos ativos da conta
+                lista_api = client.models.list()
+                ids_ativos = [
+                    m.id for m in lista_api.data 
+                    if m.id and "whisper" not in m.id.lower() and "guard" not in m.id.lower() and "embed" not in m.id.lower()
+                ]
+                for mp in modelos_preferenciais:
+                    if mp in ids_ativos:
+                        modelos_groq.append(mp)
+                for m_id in ids_ativos:
+                    if m_id not in modelos_groq and not any(d in m_id.lower() for d in ["safetensors", "tts"]):
+                        modelos_groq.append(m_id)
+            except Exception:
+                # Fallback caso a listagem dinâmica falhe
+                modelos_groq = modelos_preferenciais
+
+            if not modelos_groq:
+                modelos_groq = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
+
             ultimo_erro = None
             for modelo in modelos_groq:
                 try:
@@ -310,29 +385,38 @@ def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str)
                             {"role": "user",   "content": prompt}
                         ],
                         max_tokens=2048,
+                        temperature=0.7,
                         stream=False
                     )
-                    return response.choices[0].message.content, None
+                    if response and response.choices and len(response.choices) > 0:
+                        return response.choices[0].message.content, None
                 except Exception as e:
                     err_str = str(e)
                     ultimo_erro = err_str
-                    # Erro de autenticação — chave inválida, interrompe imediatamente
+
+                    # Erro de autenticação — chave inválida (401), interrompe imediatamente
                     if "401" in err_str or "authentication" in err_str.lower() or "invalid_api_key" in err_str.lower():
                         return None, (
                             "❌ Chave Groq inválida ou expirada (erro 401).\n\n"
-                            "Sua chave pode ter expirado. Obtenha uma nova em:\n"
+                            "Obtenha uma nova chave em:\n"
                             "➡️ https://console.groq.com/keys\n\n"
                             "A chave começa com **gsk_** — cole-a no campo 'Chave de API' na sidebar."
                         )
-                    # Modelo descontinuado — tenta o próximo
-                    if any(t in err_str.lower() for t in ["decommissioned", "deprecated", "not found", "model_not_found", "404"]):
+
+                    # Se for modelo descontinuado, não encontrado, rate limit (429) ou erro de modelo, tenta o próximo
+                    if any(t in err_str.lower() for t in [
+                        "decommissioned", "deprecated", "not found", "model_not_found",
+                        "404", "400", "429", "rate_limit", "rate limit", "503", "overloaded"
+                    ]):
                         continue
-                    # Outro erro — interrompe
+
                     break
+
             return None, (
                 f"❌ Erro na API da Groq: {ultimo_erro}\n\n"
-                "Verifique sua chave em https://console.groq.com/keys"
+                "Verifique sua chave em https://console.groq.com/keys e confirme se ela possui cota disponível."
             )
+
 
         # ── 2. MOTOR GEMINI (SDK google-genai ou REST) ─────────────────────────
         elif motor == "Gemini (Google)":
@@ -428,31 +512,6 @@ def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str)
                 "Confirme que sua chave 'AIza...' está ativa em aistudio.google.com."
             )
 
-        # ── 3. MOTOR DEEPSEEK ──────────────────────────────────────────────────
-        elif motor == "DeepSeek (Avançado)":
-            client = OpenAI(
-                api_key=api_key.strip(),
-                base_url="https://api.deepseek.com/v1"
-            )
-            try:
-                response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user",   "content": prompt}
-                    ],
-                    max_tokens=2048,
-                    stream=False
-                )
-                if response and response.choices:
-                    return response.choices[0].message.content, None
-                return None, "Resposta vazia da API do DeepSeek."
-            except Exception as e:
-                erro_str = str(e)
-                if "authentication" in erro_str.lower() or "401" in erro_str:
-                    return None, "Chave da API DeepSeek inválida. Verifique em platform.deepseek.com."
-                return None, f"Erro na API do DeepSeek: {erro_str}"
-
         return None, "Motor de IA não reconhecido."
 
     except Exception as e:
@@ -487,7 +546,7 @@ else:
     st.sidebar.header("🤖 Motor de Inteligência Artificial")
     motor_selecionado = st.sidebar.selectbox(
         "Selecione o serviço de IA:",
-        ["Groq (Rápido/Gratuito)", "Gemini (Google)", "DeepSeek (Avançado)"]
+        ["Groq (Rápido/Gratuito)", "Gemini (Google)"]
     )
 
     chave_personalizada = st.sidebar.text_input(
@@ -515,7 +574,6 @@ else:
     links_chave = {
         "Groq (Rápido/Gratuito)":  "https://console.groq.com/keys",
         "Gemini (Google)":          "https://aistudio.google.com/apikey",
-        "DeepSeek (Avançado)":      "https://platform.deepseek.com/",
     }
     st.sidebar.caption(f"🔑 [Obter chave {motor_selecionado.split()[0]}]({links_chave[motor_selecionado]})")
 
@@ -611,11 +669,12 @@ else:
             "Valores Únicos":  df.nunique().values,
         })
 
-        tab_dados, tab_diagnostico, tab_ia, tab_dash = st.tabs([
+        tab_dados, tab_diagnostico, tab_ia, tab_dash, tab_ciencia_dados = st.tabs([
             "👀 Visão Geral dos Dados",
             "🔬 Diagnóstico Técnico",
             "🤖 Parecer da IA & Insights",
-            "📊 Dashboard Interativo"
+            "📊 Dashboard Interativo",
+            "📈 Ciência de Dados & Regressão"
         ])
 
         # ── TAB 1: VISÃO GERAL ─────────────────────────────────────────────────
@@ -696,7 +755,46 @@ else:
 
         # ── TAB 3: IA & INSIGHTS ───────────────────────────────────────────────
         with tab_ia:
-            st.subheader(f"🧠 Parecer Executivo Automático via {motor_selecionado.split()[0]}")
+            st.subheader(f"🧠 Parecer & Insights com IA ({motor_selecionado.split()[0]})")
+
+            # ── Configuração de Análise (Sob Demanda vs Automático) ───────────
+            st.markdown("##### ⚙️ Configuração da Análise")
+            c_modo, c_tipo = st.columns([1, 1])
+            with c_modo:
+                modo_analise = st.radio(
+                    "Modo de Análise:",
+                    ["Automático (Padrão)", "Sob Demanda (Personalizado)"],
+                    horizontal=True,
+                    help="No modo Automático, a IA gera o parecer executivo geral completo. No modo Sob Demanda, você especifica o tipo de análise e perguntas pontuais sobre o dataset."
+                )
+
+            tipo_analise_input = "Automático (Geral)"
+            pergunta_usuario_input = ""
+
+            if modo_analise == "Sob Demanda (Personalizado)":
+                with c_tipo:
+                    tipo_analise_input = st.selectbox(
+                        "Tipo de Análise Solicitada:",
+                        [
+                            "Diagnóstico Operacional & Gargalos",
+                            "Previsão & Tendências de Negócio",
+                            "Financeiro, Custos & Rentabilidade",
+                            "Desempenho e Produtividade",
+                            "Comportamento de Clientes e Segmentação",
+                            "Qualidade e Conformidade dos Dados",
+                            "Personalizado / Outro"
+                        ]
+                    )
+                pergunta_usuario_input = st.text_area(
+                    "Pergunta ou informação específica desejada sobre o dataset:",
+                    placeholder="Ex: Quais variáveis têm maior impacto nos atrasos? Qual categoria possui a melhor margem e como otimizá-la?",
+                    help="Informe a pergunta, indicador ou foco desejado. A análise refletirá estritamente o que foi solicitado com base no dataset enviado."
+                )
+            else:
+                with c_tipo:
+                    st.info("💡 **Modo Automático Ativo:** Análise executiva geral gerada automaticamente sobre a estrutura do dataset.")
+
+            st.markdown("---")
 
             if not chave_valida:
                 st.error(
@@ -704,14 +802,17 @@ else:
                     f"no painel lateral esquerdo."
                 )
             else:
-                if st.button("✨ Gerar Parecer & Insights Prescritivos", type="primary"):
-                    with st.spinner(f"A analisar dados via {motor_selecionado}... Aguarde."):
+                btn_texto = "✨ Gerar Parecer Executivo Automático" if modo_analise == "Automático (Padrão)" else "🎯 Gerar Análise Sob Demanda"
+                if st.button(btn_texto, type="primary"):
+                    with st.spinner(f"A processar dados via {motor_selecionado}... Aguarde."):
                         info_str     = info_df.to_string(index=False)
                         describe_str = df[col_num].describe().T.to_string() if col_num else "Nenhuma variável numérica."
                         head_str     = df.head(5).to_string(index=False)
 
                         insights, erro_ia = gerar_insights_ia(
-                            motor_selecionado, chave_ativa, info_str, describe_str, head_str
+                            motor_selecionado, chave_ativa, info_str, describe_str, head_str,
+                            tipo_analise=tipo_analise_input,
+                            pergunta_usuario=pergunta_usuario_input
                         )
 
                         if erro_ia:
@@ -938,3 +1039,396 @@ else:
                     DesvPad='std'
                 ).round(2).reset_index().sort_values('Média', ascending=False)
                 st.dataframe(df_resumo, use_container_width=True, height=350)
+
+        # ── TAB 5: CIÊNCIA DE DADOS & REGRESSÃO ───────────────────────────────
+        with tab_ciencia_dados:
+            st.subheader("📈 Ciência de Dados: Regressão Linear & Estatística Avançada")
+            st.markdown(
+                "Módulo preditivo e estatístico integrado ao InnovaNexus. "
+                "Execute modelagem de **Regressão Linear** para projeções futuras temporais ou análise de correlação bivariada, "
+                "além de diagnósticos detalhados de **Quartis, Outliers e Variabilidade**."
+            )
+
+            if not col_num:
+                st.warning("⚠️ O dataset atual não contém colunas numéricas suficientes para regressão e estatística avançada.")
+            else:
+                sub_reg, sub_estat = st.tabs([
+                    "🔮 Regressão Linear & Projeções",
+                    "📊 Estatísticas Avançadas & Diagnóstico Preditivo"
+                ])
+
+                # ── SUB-ABA 1: REGRESSÃO LINEAR & PROJEÇÕES ───────────────────
+                with sub_reg:
+                    tipo_reg = st.radio(
+                        "Tipo de Modelagem:",
+                        [
+                            "Projeção Temporal (Tendência e Previsão Futura)",
+                            "Regressão Bivariada (Relação entre X e Y)"
+                        ],
+                        horizontal=True
+                    )
+
+                    if tipo_reg == "Projeção Temporal (Tendência e Previsão Futura)":
+                        # Detecta colunas temporais candidatas
+                        col_datas_possiveis = col_data if col_data else [
+                            c for c in df.columns if any(k in c.lower() for k in ('date', 'data', 'tempo', 'dt', 'periodo', 'ano', 'mes'))
+                        ]
+
+                        if not col_datas_possiveis:
+                            st.info("ℹ️ Nenhuma coluna de data identificada automaticamente. Selecione a coluna temporal desejada:")
+                            col_datas_possiveis = df.columns.tolist()
+
+                        c_reg1, c_reg2, c_reg3, c_reg4 = st.columns(4)
+                        with c_reg1:
+                            col_data_sel = st.selectbox("📅 Coluna Temporal (Data):", col_datas_possiveis)
+                        with c_reg2:
+                            col_valor_sel = st.selectbox("💰 Métrica a Projetar (Y):", col_num)
+                        with c_reg3:
+                            freq_sel = st.selectbox("⏱️ Periodicidade:", ["Mensal", "Diário", "Trimestral", "Anual"])
+                            freq_map = {"Mensal": "M", "Diário": "D", "Trimestral": "Q", "Anual": "Y"}
+                        with c_reg4:
+                            agg_sel = st.selectbox("∑ Agregação:", ["Soma", "Média"])
+                            agg_val = "sum" if agg_sel == "Soma" else "mean"
+
+                        c_p1, c_p2 = st.columns([2, 1])
+                        with c_p1:
+                            n_periodos_sel = st.slider(
+                                "Quantos períodos futuros deseja prever?",
+                                min_value=1,
+                                max_value=24,
+                                value=6,
+                                help="Número de passos futuros projetados com base na tendência linear dos dados históricos."
+                            )
+                        with c_p2:
+                            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                            btn_gerar_prev = st.button("🔮 Gerar Previsão Temporal", type="primary")
+
+                        if btn_gerar_prev:
+                            try:
+                                with st.spinner("Treinando modelo de regressão linear e calculando projeções..."):
+                                    res_prev = executar_previsao_temporal(
+                                        df, col_data_sel, col_valor_sel,
+                                        n_periodos=n_periodos_sel,
+                                        freq=freq_map[freq_sel],
+                                        agregacao=agg_val
+                                    )
+                                    st.session_state['res_prev_temp'] = res_prev
+                            except Exception as e:
+                                st.error(f"❌ Não foi possível executar a regressão temporal: {e}")
+
+                        if 'res_prev_temp' in st.session_state:
+                            rp = st.session_state['res_prev_temp']
+                            df_hist = rp['df_historico']
+                            df_prev = rp['df_previsoes']
+
+                            st.markdown("---")
+                            st.markdown("#### 📈 Qualidade do Ajuste do Modelo (Regressão Linear)")
+
+                            m1, m2, m3, m4 = st.columns(4)
+                            with m1:
+                                m1.metric("R² (Determinação)", f"{rp['r2']:.3f}")
+                                m1.caption("Quanto mais próximo de 1, melhor o ajuste da tendência")
+                            with m2:
+                                m2.metric("MAE (Erro Médio Absoluto)", formatar_valor(rp['mae']))
+                                m2.caption("Erro médio absoluto nas unidades da métrica")
+                            with m3:
+                                m3.metric("RMSE (Raiz do Erro Médio²)", formatar_valor(rp['rmse']))
+                                m3.caption("Penaliza desvios maiores")
+                            with m4:
+                                m4.metric("Coeficiente Angular", formatar_valor(rp['coef']))
+                                m4.caption(f"Variação média esperada por {freq_sel.lower()}")
+
+                            # Gráfico principal: Histórico + Tendência + Previsão
+                            st.markdown("#### 📊 Histórico e Previsão Projetada")
+                            fig_prev = go.Figure()
+
+                            # Histórico
+                            fig_prev.add_trace(go.Scatter(
+                                x=df_hist['data'],
+                                y=df_hist[rp['col_valor']],
+                                mode='lines+markers',
+                                name='Histórico Observado',
+                                line=dict(color='#3b82f6', width=3),
+                                marker=dict(size=7, color='#3b82f6')
+                            ))
+
+                            # Tendência
+                            fig_prev.add_trace(go.Scatter(
+                                x=df_hist['data'],
+                                y=df_hist['tendencia'],
+                                mode='lines',
+                                name='Linha de Tendência (Regressão)',
+                                line=dict(color='#f59e0b', width=2, dash='dash')
+                            ))
+
+                            # Projeção futura
+                            fig_prev.add_trace(go.Scatter(
+                                x=df_prev['data'],
+                                y=df_prev['valor_previsto'],
+                                mode='lines+markers',
+                                name=f'Projeção Futura ({rp["n_periodos"]} períodos)',
+                                line=dict(color='#10b981', width=3),
+                                marker=dict(size=9, color='#10b981', symbol='diamond')
+                            ))
+
+                            # Linha conectando o último ponto histórico com a primeira previsão
+                            fig_prev.add_trace(go.Scatter(
+                                x=[df_hist['data'].iloc[-1], df_prev['data'].iloc[0]],
+                                y=[df_hist[rp['col_valor']].iloc[-1], df_prev['valor_previsto'].iloc[0]],
+                                mode='lines',
+                                name='Conexão',
+                                line=dict(color='#10b981', width=2, dash='dot'),
+                                showlegend=False
+                            ))
+
+                            fig_prev.update_layout(
+                                title=f"Análise de Tendência e Previsão de '{rp['col_valor']}' ao Longo do Tempo",
+                                xaxis_title="Período",
+                                yaxis_title=rp['col_valor'],
+                                template="plotly_dark",
+                                height=500,
+                                hovermode="x unified"
+                            )
+                            st.plotly_chart(fig_prev, use_container_width=True)
+
+                            # Tabela de Detalhes da Previsão e Comparativo
+                            c_tab, c_bar = st.columns([1, 1])
+
+                            with c_tab:
+                                st.markdown("##### 📋 Tabela de Projeção Detalhada")
+                                df_prev_view = df_prev.copy()
+                                df_prev_view['periodo_fmt'] = df_prev_view['data'].dt.strftime('%b/%Y' if rp['col_data'] else '%d/%m/%Y')
+                                df_prev_view['valor_fmt'] = df_prev_view['valor_previsto'].apply(formatar_valor)
+                                df_prev_view['crescimento_fmt'] = df_prev_view['crescimento_pct'].apply(
+                                    lambda x: f"{x:+.1f}%" if not pd.isna(x) else "-"
+                                )
+                                st.dataframe(
+                                    df_prev_view[['periodo_fmt', 'valor_fmt', 'crescimento_fmt']].rename(columns={
+                                        'periodo_fmt': 'Período',
+                                        'valor_fmt': 'Valor Previsto',
+                                        'crescimento_fmt': 'Crescimento (%)'
+                                    }),
+                                    use_container_width=True,
+                                    height=320
+                                )
+
+                            with c_bar:
+                                st.markdown("##### 📊 Comparativo: Recente vs Previsão")
+                                n_hist_comp = min(6, len(df_hist))
+                                df_hist_comp = df_hist.tail(n_hist_comp)
+
+                                fig_comp = go.Figure()
+                                fig_comp.add_trace(go.Bar(
+                                    x=df_hist_comp['data'].dt.strftime('%b/%Y'),
+                                    y=df_hist_comp[rp['col_valor']],
+                                    name='Histórico Recente',
+                                    marker_color='#3b82f6'
+                                ))
+                                fig_comp.add_trace(go.Bar(
+                                    x=df_prev['data'].dt.strftime('%b/%Y'),
+                                    y=df_prev['valor_previsto'],
+                                    name='Previsão Futura',
+                                    marker_color='#10b981'
+                                ))
+                                fig_comp.update_layout(
+                                    title=f"Últimos {n_hist_comp} Períodos vs Previsão",
+                                    xaxis_title="Período",
+                                    yaxis_title=rp['col_valor'],
+                                    barmode="group",
+                                    template="plotly_dark",
+                                    height=320
+                                )
+                                st.plotly_chart(fig_comp, use_container_width=True)
+
+                            # Resumo Executivo
+                            st.markdown("##### 📌 Resumo Executivo da Previsão")
+                            r1, r2, r3, r4 = st.columns(4)
+                            r1.metric("Total Previsto", formatar_valor(rp['total_previsto']))
+                            r2.metric("Média Periódica", formatar_valor(rp['media_mensal']))
+                            r3.metric("Crescimento Esperado", f"{rp['crescimento_total']:+.1f}%")
+                            r4.metric("Último Ponto Histórico", formatar_valor(rp['ultimo_historico']))
+
+                            # Expander técnico
+                            with st.expander("ℹ️ Detalhes Matemáticos e Interpretação do Modelo"):
+                                st.markdown(f"""
+                                - **Equação da Reta:** $Y = {rp['intercept']:,.2f} + ({rp['coef']:,.2f}) \\times X$
+                                - **Coeficiente Angular:** {formatar_valor(rp['coef'])} por período (variação periódica esperada)
+                                - **Coeficiente de Determinação ($R^2$):** {rp['r2']:.3f} ({rp['r2'] * 100:.1f}% da variação explicada pela tendência linear)
+                                - **Avaliação do Ajuste:** {'✅ Excelente ajuste linear (R² ≥ 0.70)' if rp['r2'] >= 0.7 else 'ℹ️ Ajuste moderado (0.50 ≤ R² < 0.70). Recomenda-se cautela em projeções de longo prazo.' if rp['r2'] >= 0.5 else '⚠️ Ajuste fraco (R² < 0.50). Podem existir fortes componentes sazonais ou não-lineares.'}
+                                """)
+
+                    else:
+                        # Regressão Bivariada (X vs Y)
+                        st.markdown("##### 🔬 Regressão Linear entre Duas Variáveis Numéricas")
+                        col_bx, col_by = st.columns(2)
+                        with col_bx:
+                            x_col_sel = st.selectbox("Variável Independente (X):", col_num, index=0)
+                        with col_by:
+                            y_opts = [c for c in col_num if c != x_col_sel] or col_num
+                            y_col_sel = st.selectbox("Variável Dependente (Y):", y_opts, index=0)
+
+                        if st.button("🔬 Ajustar Modelo Linear (X → Y)", type="primary"):
+                            try:
+                                with st.spinner("Ajustando modelo de regressão linear..."):
+                                    res_biv = executar_regressao_bivariada(df, x_col_sel, y_col_sel)
+                                    st.session_state['res_biv'] = res_biv
+                            except Exception as e:
+                                st.error(f"❌ Erro na regressão bivariada: {e}")
+
+                        if 'res_biv' in st.session_state:
+                            rb = st.session_state['res_biv']
+                            df_biv = rb['df_clean']
+
+                            st.markdown("---")
+                            b1, b2, b3, b4 = st.columns(4)
+                            b1.metric("R² (Determinação)", f"{rb['r2']:.3f}")
+                            b2.metric("MAE", formatar_valor(rb['mae']))
+                            b3.metric("RMSE", formatar_valor(rb['rmse']))
+                            b4.metric("Coeficiente Angular", f"{rb['coef']:,.4f}")
+
+                            fig_biv = px.scatter(
+                                df_biv, x=rb['col_x'], y=rb['col_y'],
+                                title=f"Dispersão com Linha de Regressão: {rb['col_y']} vs {rb['col_x']}",
+                                template="plotly_dark",
+                                opacity=0.7
+                            )
+                            # Ordena X para traçar a linha de regressão
+                            df_sorted = df_biv.sort_values(rb['col_x'])
+                            fig_biv.add_trace(go.Scatter(
+                                x=df_sorted[rb['col_x']],
+                                y=df_sorted['y_pred'],
+                                mode='lines',
+                                name='Reta de Regressão Ajustada',
+                                line=dict(color='#ef4444', width=3)
+                            ))
+                            st.plotly_chart(fig_biv, use_container_width=True)
+
+                            st.caption(f"Equação: **{rb['col_y']} = {rb['intercept']:,.4f} + ({rb['coef']:,.4f}) × {rb['col_x']}** (Amostra: {rb['n_obs']} pares válidos)")
+
+                # ── SUB-ABA 2: ESTATÍSTICAS AVANÇADAS & DIAGNÓSTICO ───────────
+                with sub_estat:
+                    st.markdown("#### 📊 Análise Estatística de Variabilidade, Quartis e Outliers")
+
+                    col_estat_sel = st.selectbox("Selecione a Métrica Numérica para Diagnóstico:", col_num, key="sb_estat_metric")
+
+                    try:
+                        estat_metric = calcular_estatisticas_resumo(df[col_estat_sel])
+
+                        # 4 Métricas principais no topo (conforme módulo do dashboard externo)
+                        e1, e2, e3, e4 = st.columns(4)
+                        cv_val = estat_metric['coef_variacao']
+                        with e1:
+                            e1.metric("📊 Coef. de Variação", f"{cv_val:.2f}%")
+                            e1.caption("Alta (>50%)" if cv_val > 50 else "Moderada (>30%)" if cv_val > 30 else "Baixa (≤30%)")
+
+                        with e2:
+                            col_outras = [c for c in col_num if c != col_estat_sel]
+                            if col_outras:
+                                col_corr_sel = st.selectbox("Comparar correlação com:", col_outras, key="sb_corr_metric")
+                                s1 = pd.to_numeric(df[col_estat_sel], errors='coerce')
+                                s2 = pd.to_numeric(df[col_corr_sel], errors='coerce')
+                                corr_par = s1.corr(s2)
+                                e2.metric(f"🔗 Correlação com '{col_corr_sel}'", f"{corr_par:.3f}" if not pd.isna(corr_par) else "N/A")
+                            else:
+                                e2.metric("🔗 Correlação", "1.000")
+                            e2.caption("Correlação de Pearson")
+
+                        with e3:
+                            e3.metric("⚠️ Outliers (>95%)", f"{estat_metric['outliers_p95_pct']:.1f}%")
+                            e3.caption(f"{estat_metric['outliers_p95_count']} registros no 95º percentil")
+
+                        with e4:
+                            e4.metric("📈 Mediana", formatar_valor(estat_metric['mediana']))
+                            e4.caption(f"Média: {formatar_valor(estat_metric['media'])}")
+
+                        st.markdown("---")
+
+                        # Linha com Histograma até 95% e Gráfico de Pizza de Quartis/Outliers
+                        ge1, ge2 = st.columns(2)
+
+                        with ge1:
+                            # Histograma com linhas de média e mediana
+                            limite_p95 = estat_metric['p95']
+                            s_filtrada = df[pd.to_numeric(df[col_estat_sel], errors='coerce') <= limite_p95][col_estat_sel]
+
+                            fig_dist = go.Figure()
+                            fig_dist.add_trace(go.Histogram(
+                                x=s_filtrada,
+                                nbinsx=40,
+                                name="Frequência",
+                                marker_color="#3b82f6",
+                                opacity=0.75
+                            ))
+                            fig_dist.add_vline(
+                                x=estat_metric['media'],
+                                line_dash="dash",
+                                line_color="#ef4444",
+                                annotation_text=f"Média: {formatar_valor(estat_metric['media'])}"
+                            )
+                            fig_dist.add_vline(
+                                x=estat_metric['mediana'],
+                                line_dash="dash",
+                                line_color="#10b981",
+                                annotation_text=f"Mediana: {formatar_valor(estat_metric['mediana'])}"
+                            )
+                            fig_dist.update_layout(
+                                title=f"Distribuição de '{col_estat_sel}' (até o 95º percentil)",
+                                xaxis_title=col_estat_sel,
+                                yaxis_title="Frequência",
+                                template="plotly_dark",
+                                height=420
+                            )
+                            st.plotly_chart(fig_dist, use_container_width=True)
+
+                        with ge2:
+                            # Pizza de Quartis e Outliers (IQR)
+                            classificacao_quartis = classificar_quartis_outliers(df[col_estat_sel])
+                            cont_quartis = classificacao_quartis.value_counts()
+
+                            fig_quartis = px.pie(
+                                values=cont_quartis.values,
+                                names=cont_quartis.index,
+                                title=f"Segmentação por Quartis & Outliers (Critério IQR)",
+                                template="plotly_dark",
+                                hole=0.35,
+                                color_discrete_sequence=px.colors.qualitative.Pastel
+                            )
+                            fig_quartis.update_traces(textposition="inside", textinfo="percent+label")
+                            fig_quartis.update_layout(height=420)
+                            st.plotly_chart(fig_quartis, use_container_width=True)
+
+                        # Tabela detalhada de quartis
+                        st.markdown("##### 📋 Tabela Resumo de Quartis & Limites de Outlier")
+                        df_resumo_q = pd.DataFrame({
+                            "Parâmetro Estatístico": [
+                                "Q1 (25% dos dados)",
+                                "Q2 (Mediana / 50%)",
+                                "Q3 (75% dos dados)",
+                                "IQR (Intervalo Interquartil)",
+                                "Limite Inferior (Q1 - 1.5×IQR)",
+                                "Limite Superior (Q3 + 1.5×IQR)",
+                                "Total de Outliers IQR",
+                                "% de Outliers IQR"
+                            ],
+                            "Valor Calculado": [
+                                formatar_valor(estat_metric['q1']),
+                                formatar_valor(estat_metric['q2']),
+                                formatar_valor(estat_metric['q3']),
+                                formatar_valor(estat_metric['iqr']),
+                                formatar_valor(estat_metric['limite_inferior']),
+                                formatar_valor(estat_metric['limite_superior']),
+                                f"{estat_metric['outliers_iqr_count']:,}",
+                                f"{estat_metric['outliers_iqr_pct']:.2f}%"
+                            ]
+                        })
+                        st.dataframe(df_resumo_q, use_container_width=True, hide_index=True)
+
+                        with st.expander("🔍 Parecer Estatístico & Recomendações Prescritivas"):
+                            st.markdown(f"""
+                            - **Variabilidade dos Dados:** Coeficiente de variação de **{cv_val:.2f}%** indica **{'alta' if cv_val > 50 else 'moderada' if cv_val > 30 else 'baixa'}** dispersão relativa dos valores de '{col_estat_sel}'.
+                            - **Presença de Outliers:** Identificados **{estat_metric['outliers_iqr_count']}** registros além dos limites IQR ({estat_metric['outliers_iqr_pct']:.1f}% do total).
+                            - **Diferença Média vs Mediana:** A média ({formatar_valor(estat_metric['media'])}) está {'acima' if estat_metric['media'] > estat_metric['mediana'] else 'abaixo'} da mediana ({formatar_valor(estat_metric['mediana'])}), indicando assimetria {'positiva (puxada por valores altos)' if estat_metric['media'] > estat_metric['mediana'] else 'negativa'}.
+                            """)
+
+                    except Exception as e_estat:
+                        st.error(f"Erro ao processar estatísticas de '{col_estat_sel}': {e_estat}")
