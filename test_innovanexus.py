@@ -14,13 +14,15 @@ import pandas as pd
 
 from data_science import (
     formatar_valor,
+    eh_coluna_monetaria,
+    obter_prefixo_coluna,
     calcular_estatisticas_resumo,
     classificar_quartis_outliers,
     treinar_regressao_linear,
     executar_previsao_temporal,
     executar_regressao_bivariada,
 )
-from app import construir_prompt_insights
+from app import construir_prompt_insights, executar_etl_automatico
 
 
 class TestAnaliseSobDemanda(unittest.TestCase):
@@ -236,13 +238,63 @@ class TestEstatisticasAvancadas(unittest.TestCase):
         classif = classificar_quartis_outliers(serie)
         self.assertIn("Outlier Superior", classif.values)
 
-    def test_formatar_valor(self):
-        self.assertEqual(formatar_valor(1500000), "R$ 1,50M")
-        self.assertEqual(formatar_valor(2500), "R$ 2.500")
-        self.assertEqual(formatar_valor(45.5), "R$ 45,50")
+    def test_identificacao_coluna_monetaria(self):
+        """Verifica se colunas financeiras e não financeiras são distinguidas corretamente."""
+        self.assertTrue(eh_coluna_monetaria("valor_nota_fiscal"))
+        self.assertTrue(eh_coluna_monetaria("valor_produto"))
+        self.assertTrue(eh_coluna_monetaria("faturamento"))
+        self.assertTrue(eh_coluna_monetaria("custo_total"))
+        self.assertTrue(eh_coluna_monetaria("preco_unitario"))
+
+        # Colunas do dataset de estudantes NÃO devem ser monetárias
+        self.assertFalse(eh_coluna_monetaria("idade"))
+        self.assertFalse(eh_coluna_monetaria("tempo_tela_horas"))
+        self.assertFalse(eh_coluna_monetaria("horas_sono"))
+        self.assertFalse(eh_coluna_monetaria("pontuacao_foco_cognitivo"))
+        self.assertFalse(eh_coluna_monetaria("indice_ansiedade"))
+        self.assertFalse(eh_coluna_monetaria("quantidade_comprada"))
+
+    def test_formatar_valor_monetario_e_nao_monetario(self):
+        """Verifica se valores monetários recebem R$ e valores comuns não recebem R$."""
+        # Coluna financeira: deve conter R$
+        self.assertEqual(formatar_valor(1500000, nome_coluna="faturamento"), "R$ 1,50M")
+        self.assertEqual(formatar_valor(2500, nome_coluna="valor_total"), "R$ 2.500")
+        self.assertEqual(formatar_valor(45.5, nome_coluna="preco"), "R$ 45,50")
+
+        # Coluna de idade / quantidade / horas: NÃO deve conter R$
+        self.assertEqual(formatar_valor(16.0, nome_coluna="idade"), "16")
+        self.assertEqual(formatar_valor(16.5, nome_coluna="idade"), "16,50")
+        self.assertEqual(formatar_valor(8.0, nome_coluna="horas_sono"), "8")
+        self.assertEqual(formatar_valor(87.5, nome_coluna="pontuacao_foco_cognitivo"), "87,50")
+        self.assertEqual(formatar_valor(2500, nome_coluna="quantidade"), "2.500")
+
+        # Nulos
         self.assertEqual(formatar_valor(None), "N/A")
         self.assertEqual(formatar_valor(np.nan), "N/A")
 
 
+class TestETL(unittest.TestCase):
+    """Testes para o ETL automático corrigido."""
+
+    def test_etl_nao_converte_duracao_em_datetime(self):
+        """Verifica que colunas como horas_sono e tempo_tela_horas permanecem numéricas."""
+        df_raw = pd.DataFrame({
+            "data_registro": ["2025-01-01", "2025-01-02", "2025-01-03"],
+            "aluno_id": ["ALT-1", "ALT-2", "ALT-3"],
+            "idade": [18, 16, 17],
+            "tempo_tela_horas": [3.2, 6.8, 4.5],
+            "horas_sono": [7.3, 5.9, 8.0]
+        })
+        df_limpo = executar_etl_automatico(df_raw)
+
+        # data_registro deve ser datetime
+        self.assertTrue(pd.api.types.is_datetime64_any_dtype(df_limpo["data_registro"]))
+        # horas_sono e tempo_tela_horas DEVEM ser numéricas, NÃO datetime
+        self.assertTrue(pd.api.types.is_numeric_dtype(df_limpo["horas_sono"]))
+        self.assertTrue(pd.api.types.is_numeric_dtype(df_limpo["tempo_tela_horas"]))
+        self.assertTrue(pd.api.types.is_numeric_dtype(df_limpo["idade"]))
+
+
 if __name__ == "__main__":
     unittest.main()
+
