@@ -179,36 +179,34 @@ def gerar_pdf_executivo(total_linhas, total_colunas, nulos_totais, parecer_texto
 # ---------------------------------------------------------
 # FUNÇÃO DE ETL AUTOMÁTICO
 # ---------------------------------------------------------
+
 def executar_etl_automatico(df_raw):
     df_clean = df_raw.copy()
     df_clean = df_clean.drop_duplicates()
 
+    # Limpeza de espaços em branco em textos
     colunas_texto = df_clean.select_dtypes(include=['object']).columns
     for col in colunas_texto:
         df_clean[col] = df_clean[col].astype(str).str.strip()
 
+    # Identificação inteligente de datas (evita converter quantidades como 'horas_sono' ou 'tempo_tela_horas')
     for col in df_clean.columns:
-        if any(k in col.lower() for k in ('date', 'time', 'dt', 'data', 'hora')):
+        col_lower = col.lower()
+        # Se for uma coluna de quantidade/duração, NÃO converte para datetime
+        eh_duracao_ou_numero = any(p in col_lower for p in ['tempo_', '_horas', 'horas_', '_minutos', 'minutos_'])
+        
+        if not eh_duracao_ou_numero and any(k in col_lower for k in ('date', 'dt', 'data_registro', 'timestamp')):
             try:
                 df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce')
             except Exception:
                 pass
 
-    if 'data_hora_real' in df_clean.columns and 'data_hora_agendada' in df_clean.columns:
-        if (pd.api.types.is_datetime64_any_dtype(df_clean['data_hora_real']) and
-                pd.api.types.is_datetime64_any_dtype(df_clean['data_hora_agendada'])):
-            df_clean['atraso_real_minutos'] = (
-                (df_clean['data_hora_real'] - df_clean['data_hora_agendada'])
-                .dt.total_seconds() / 60.0
-            ).round(1)
+    # Garante conversão de colunas numéricas de horas para float
+    for col in df_clean.columns:
+        if any(p in col.lower() for p in ['tempo_', 'horas_', 'uso_ia', 'pontuacao_', 'indice_', 'idade']):
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
 
-    if 'flag_pontualidade' in df_clean.columns:
-        df_clean['pontualidade_pct'] = (
-            df_clean['flag_pontualidade'].astype(str).str.lower()
-            .map({'true': 100, 'false': 0, '1': 100, '0': 0})
-            .fillna(0)
-        )
-
+    # Tratamento de valores ausentes
     for col in df_clean.columns:
         if df_clean[col].isnull().sum() > 0:
             if pd.api.types.is_numeric_dtype(df_clean[col]):
@@ -218,6 +216,7 @@ def executar_etl_automatico(df_raw):
             else:
                 df_clean[col] = df_clean[col].fillna("Não informado")
 
+    # Extrai Ano e Mês APENAS de colunas que são puramente datas (como data_registro)
     colunas_datas = df_clean.select_dtypes(include=['datetime64[ns]', 'datetime64']).columns
     for col in colunas_datas:
         prefixo = col.replace('_datetime', '').replace('_date', '').replace('_data', '')
@@ -225,7 +224,6 @@ def executar_etl_automatico(df_raw):
         df_clean[f'{prefixo}_mes'] = df_clean[col].dt.month_name().map(MESES_PT).fillna(df_clean[col].dt.month_name())
 
     return df_clean
-
 # ---------------------------------------------------------
 # FUNÇÃO DE CARREGAMENTO SQL
 # ---------------------------------------------------------
