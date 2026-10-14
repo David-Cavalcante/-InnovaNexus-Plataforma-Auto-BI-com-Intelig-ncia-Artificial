@@ -21,6 +21,8 @@ import numpy as np
 
 from data_science import (
     formatar_valor,
+    eh_coluna_monetaria,
+    obter_prefixo_coluna,
     calcular_estatisticas_resumo,
     classificar_quartis_outliers,
     treinar_regressao_linear,
@@ -177,9 +179,8 @@ def gerar_pdf_executivo(total_linhas, total_colunas, nulos_totais, parecer_texto
     return bytes(saida) if isinstance(saida, (bytearray, bytes)) else saida.encode('latin-1')
 
 # ---------------------------------------------------------
-# FUNÇÃO DE ETL AUTOMÁTICO
+# FUNÇÃO DE ETL AUTOMÁTICO (VERSÃO CORRIGIDA)
 # ---------------------------------------------------------
-
 def executar_etl_automatico(df_raw):
     df_clean = df_raw.copy()
     df_clean = df_clean.drop_duplicates()
@@ -206,6 +207,21 @@ def executar_etl_automatico(df_raw):
         if any(p in col.lower() for p in ['tempo_', 'horas_', 'uso_ia', 'pontuacao_', 'indice_', 'idade']):
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
 
+    if 'data_hora_real' in df_clean.columns and 'data_hora_agendada' in df_clean.columns:
+        if (pd.api.types.is_datetime64_any_dtype(df_clean['data_hora_real']) and
+                pd.api.types.is_datetime64_any_dtype(df_clean['data_hora_agendada'])):
+            df_clean['atraso_real_minutos'] = (
+                (df_clean['data_hora_real'] - df_clean['data_hora_agendada'])
+                .dt.total_seconds() / 60.0
+            ).round(1)
+
+    if 'flag_pontualidade' in df_clean.columns:
+        df_clean['pontualidade_pct'] = (
+            df_clean['flag_pontualidade'].astype(str).str.lower()
+            .map({'true': 100, 'false': 0, '1': 100, '0': 0})
+            .fillna(0)
+        )
+
     # Tratamento de valores ausentes
     for col in df_clean.columns:
         if df_clean[col].isnull().sum() > 0:
@@ -224,6 +240,7 @@ def executar_etl_automatico(df_raw):
         df_clean[f'{prefixo}_mes'] = df_clean[col].dt.month_name().map(MESES_PT).fillna(df_clean[col].dt.month_name())
 
     return df_clean
+
 # ---------------------------------------------------------
 # FUNÇÃO DE CARREGAMENTO SQL
 # ---------------------------------------------------------
@@ -1080,13 +1097,20 @@ else:
                         with c_reg1:
                             col_data_sel = st.selectbox("📅 Coluna Temporal (Data):", col_datas_possiveis)
                         with c_reg2:
-                            col_valor_sel = st.selectbox("💰 Métrica a Projetar (Y):", col_num)
+                            col_valor_sel = st.selectbox("📈 Métrica a Projetar (Y):", col_num)
+
+                        is_moeda_sel = eh_coluna_monetaria(col_valor_sel)
+                        prefixo_prev = "R$ " if is_moeda_sel else ""
+
                         with c_reg3:
                             freq_sel = st.selectbox("⏱️ Periodicidade:", ["Mensal", "Diário", "Trimestral", "Anual"])
                             freq_map = {"Mensal": "M", "Diário": "D", "Trimestral": "Q", "Anual": "Y"}
                         with c_reg4:
-                            agg_sel = st.selectbox("∑ Agregação:", ["Soma", "Média"])
+                            default_agg_idx = 0 if is_moeda_sel else 1
+                            agg_sel = st.selectbox("∑ Agregação:", ["Soma", "Média"], index=default_agg_idx)
                             agg_val = "sum" if agg_sel == "Soma" else "mean"
+
+                        st.caption(f"🏷️ Unidade identificada automaticamente: **{'Monetária (R$)' if is_moeda_sel else 'Quantidade / Numérica Geral'}**")
 
                         c_p1, c_p2 = st.columns([2, 1])
                         with c_p1:
@@ -1118,6 +1142,8 @@ else:
                             rp = st.session_state['res_prev_temp']
                             df_hist = rp['df_historico']
                             df_prev = rp['df_previsoes']
+                            is_moeda_res = eh_coluna_monetaria(rp['col_valor'])
+                            prefixo_res = "R$ " if is_moeda_res else ""
 
                             st.markdown("---")
                             st.markdown("#### 📈 Qualidade do Ajuste do Modelo (Regressão Linear)")
@@ -1127,13 +1153,13 @@ else:
                                 m1.metric("R² (Determinação)", f"{rp['r2']:.3f}")
                                 m1.caption("Quanto mais próximo de 1, melhor o ajuste da tendência")
                             with m2:
-                                m2.metric("MAE (Erro Médio Absoluto)", formatar_valor(rp['mae']))
+                                m2.metric("MAE (Erro Médio Absoluto)", formatar_valor(rp['mae'], prefixo=prefixo_res))
                                 m2.caption("Erro médio absoluto nas unidades da métrica")
                             with m3:
-                                m3.metric("RMSE (Raiz do Erro Médio²)", formatar_valor(rp['rmse']))
+                                m3.metric("RMSE (Raiz do Erro Médio²)", formatar_valor(rp['rmse'], prefixo=prefixo_res))
                                 m3.caption("Penaliza desvios maiores")
                             with m4:
-                                m4.metric("Coeficiente Angular", formatar_valor(rp['coef']))
+                                m4.metric("Coeficiente Angular", f"{formatar_valor(rp['coef'], prefixo=prefixo_res)} / período")
                                 m4.caption(f"Variação média esperada por {freq_sel.lower()}")
 
                             # Gráfico principal: Histórico + Tendência + Previsão
@@ -1193,17 +1219,20 @@ else:
                             c_tab, c_bar = st.columns([1, 1])
 
                             with c_tab:
+                                col_prev_label = f"Valor Previsto ({prefixo_res.strip()})" if prefixo_res else "Valor Previsto"
                                 st.markdown("##### 📋 Tabela de Projeção Detalhada")
                                 df_prev_view = df_prev.copy()
                                 df_prev_view['periodo_fmt'] = df_prev_view['data'].dt.strftime('%b/%Y' if rp['col_data'] else '%d/%m/%Y')
-                                df_prev_view['valor_fmt'] = df_prev_view['valor_previsto'].apply(formatar_valor)
+                                df_prev_view['valor_fmt'] = df_prev_view['valor_previsto'].apply(
+                                    lambda v: formatar_valor(v, prefixo=prefixo_res)
+                                )
                                 df_prev_view['crescimento_fmt'] = df_prev_view['crescimento_pct'].apply(
                                     lambda x: f"{x:+.1f}%" if not pd.isna(x) else "-"
                                 )
                                 st.dataframe(
                                     df_prev_view[['periodo_fmt', 'valor_fmt', 'crescimento_fmt']].rename(columns={
                                         'periodo_fmt': 'Período',
-                                        'valor_fmt': 'Valor Previsto',
+                                        'valor_fmt': col_prev_label,
                                         'crescimento_fmt': 'Crescimento (%)'
                                     }),
                                     use_container_width=True,
@@ -1241,16 +1270,16 @@ else:
                             # Resumo Executivo
                             st.markdown("##### 📌 Resumo Executivo da Previsão")
                             r1, r2, r3, r4 = st.columns(4)
-                            r1.metric("Total Previsto", formatar_valor(rp['total_previsto']))
-                            r2.metric("Média Periódica", formatar_valor(rp['media_mensal']))
+                            r1.metric("Total Previsto", formatar_valor(rp['total_previsto'], prefixo=prefixo_res))
+                            r2.metric("Média Periódica", formatar_valor(rp['media_mensal'], prefixo=prefixo_res))
                             r3.metric("Crescimento Esperado", f"{rp['crescimento_total']:+.1f}%")
-                            r4.metric("Último Ponto Histórico", formatar_valor(rp['ultimo_historico']))
+                            r4.metric("Último Ponto Histórico", formatar_valor(rp['ultimo_historico'], prefixo=prefixo_res))
 
                             # Expander técnico
                             with st.expander("ℹ️ Detalhes Matemáticos e Interpretação do Modelo"):
                                 st.markdown(f"""
                                 - **Equação da Reta:** $Y = {rp['intercept']:,.2f} + ({rp['coef']:,.2f}) \\times X$
-                                - **Coeficiente Angular:** {formatar_valor(rp['coef'])} por período (variação periódica esperada)
+                                - **Coeficiente Angular:** {formatar_valor(rp['coef'], prefixo=prefixo_res)} por período (variação periódica esperada)
                                 - **Coeficiente de Determinação ($R^2$):** {rp['r2']:.3f} ({rp['r2'] * 100:.1f}% da variação explicada pela tendência linear)
                                 - **Avaliação do Ajuste:** {'✅ Excelente ajuste linear (R² ≥ 0.70)' if rp['r2'] >= 0.7 else 'ℹ️ Ajuste moderado (0.50 ≤ R² < 0.70). Recomenda-se cautela em projeções de longo prazo.' if rp['r2'] >= 0.5 else '⚠️ Ajuste fraco (R² < 0.50). Podem existir fortes componentes sazonais ou não-lineares.'}
                                 """)
@@ -1265,6 +1294,8 @@ else:
                             y_opts = [c for c in col_num if c != x_col_sel] or col_num
                             y_col_sel = st.selectbox("Variável Dependente (Y):", y_opts, index=0)
 
+                        prefixo_y = obter_prefixo_coluna(y_col_sel)
+
                         if st.button("🔬 Ajustar Modelo Linear (X → Y)", type="primary"):
                             try:
                                 with st.spinner("Ajustando modelo de regressão linear..."):
@@ -1276,12 +1307,13 @@ else:
                         if 'res_biv' in st.session_state:
                             rb = st.session_state['res_biv']
                             df_biv = rb['df_clean']
+                            prefixo_rb = obter_prefixo_coluna(rb['col_y'])
 
                             st.markdown("---")
                             b1, b2, b3, b4 = st.columns(4)
                             b1.metric("R² (Determinação)", f"{rb['r2']:.3f}")
-                            b2.metric("MAE", formatar_valor(rb['mae']))
-                            b3.metric("RMSE", formatar_valor(rb['rmse']))
+                            b2.metric("MAE", formatar_valor(rb['mae'], prefixo=prefixo_rb))
+                            b3.metric("RMSE", formatar_valor(rb['rmse'], prefixo=prefixo_rb))
                             b4.metric("Coeficiente Angular", f"{rb['coef']:,.4f}")
 
                             fig_biv = px.scatter(
@@ -1308,11 +1340,14 @@ else:
                     st.markdown("#### 📊 Análise Estatística de Variabilidade, Quartis e Outliers")
 
                     col_estat_sel = st.selectbox("Selecione a Métrica Numérica para Diagnóstico:", col_num, key="sb_estat_metric")
+                    is_moeda_estat = eh_coluna_monetaria(col_estat_sel)
+                    prefixo_estat = "R$ " if is_moeda_estat else ""
+                    st.caption(f"🏷️ Unidade identificada automaticamente: **{'Monetária (R$)' if is_moeda_estat else 'Quantidade / Numérica Geral'}**")
 
                     try:
                         estat_metric = calcular_estatisticas_resumo(df[col_estat_sel])
 
-                        # 4 Métricas principais no topo (conforme módulo do dashboard externo)
+                        # 4 Métricas principais no topo
                         e1, e2, e3, e4 = st.columns(4)
                         cv_val = estat_metric['coef_variacao']
                         with e1:
@@ -1336,8 +1371,8 @@ else:
                             e3.caption(f"{estat_metric['outliers_p95_count']} registros no 95º percentil")
 
                         with e4:
-                            e4.metric("📈 Mediana", formatar_valor(estat_metric['mediana']))
-                            e4.caption(f"Média: {formatar_valor(estat_metric['media'])}")
+                            e4.metric("📈 Mediana", formatar_valor(estat_metric['mediana'], prefixo=prefixo_estat))
+                            e4.caption(f"Média: {formatar_valor(estat_metric['media'], prefixo=prefixo_estat)}")
 
                         st.markdown("---")
 
@@ -1361,13 +1396,15 @@ else:
                                 x=estat_metric['media'],
                                 line_dash="dash",
                                 line_color="#ef4444",
-                                annotation_text=f"Média: {formatar_valor(estat_metric['media'])}"
+                                annotation_text=f"Média: {formatar_valor(estat_metric['media'], prefixo=prefixo_estat)}",
+                                annotation_position="top left"
                             )
                             fig_dist.add_vline(
                                 x=estat_metric['mediana'],
                                 line_dash="dash",
                                 line_color="#10b981",
-                                annotation_text=f"Mediana: {formatar_valor(estat_metric['mediana'])}"
+                                annotation_text=f"Mediana: {formatar_valor(estat_metric['mediana'], prefixo=prefixo_estat)}",
+                                annotation_position="top right"
                             )
                             fig_dist.update_layout(
                                 title=f"Distribuição de '{col_estat_sel}' (até o 95º percentil)",
@@ -1409,12 +1446,12 @@ else:
                                 "% de Outliers IQR"
                             ],
                             "Valor Calculado": [
-                                formatar_valor(estat_metric['q1']),
-                                formatar_valor(estat_metric['q2']),
-                                formatar_valor(estat_metric['q3']),
-                                formatar_valor(estat_metric['iqr']),
-                                formatar_valor(estat_metric['limite_inferior']),
-                                formatar_valor(estat_metric['limite_superior']),
+                                formatar_valor(estat_metric['q1'], prefixo=prefixo_estat),
+                                formatar_valor(estat_metric['q2'], prefixo=prefixo_estat),
+                                formatar_valor(estat_metric['q3'], prefixo=prefixo_estat),
+                                formatar_valor(estat_metric['iqr'], prefixo=prefixo_estat),
+                                formatar_valor(estat_metric['limite_inferior'], prefixo=prefixo_estat),
+                                formatar_valor(estat_metric['limite_superior'], prefixo=prefixo_estat),
                                 f"{estat_metric['outliers_iqr_count']:,}",
                                 f"{estat_metric['outliers_iqr_pct']:.2f}%"
                             ]
@@ -1425,9 +1462,8 @@ else:
                             st.markdown(f"""
                             - **Variabilidade dos Dados:** Coeficiente de variação de **{cv_val:.2f}%** indica **{'alta' if cv_val > 50 else 'moderada' if cv_val > 30 else 'baixa'}** dispersão relativa dos valores de '{col_estat_sel}'.
                             - **Presença de Outliers:** Identificados **{estat_metric['outliers_iqr_count']}** registros além dos limites IQR ({estat_metric['outliers_iqr_pct']:.1f}% do total).
-                            - **Diferença Média vs Mediana:** A média ({formatar_valor(estat_metric['media'])}) está {'acima' if estat_metric['media'] > estat_metric['mediana'] else 'abaixo'} da mediana ({formatar_valor(estat_metric['mediana'])}), indicando assimetria {'positiva (puxada por valores altos)' if estat_metric['media'] > estat_metric['mediana'] else 'negativa'}.
+                            - **Diferença Média vs Mediana:** A média ({formatar_valor(estat_metric['media'], prefixo=prefixo_estat)}) está {'acima' if estat_metric['media'] > estat_metric['mediana'] else 'abaixo'} da mediana ({formatar_valor(estat_metric['mediana'], prefixo=prefixo_estat)}), indicando assimetria {'positiva (puxada por valores altos)' if estat_metric['media'] > estat_metric['mediana'] else 'negativa'}.
                             """)
 
                     except Exception as e_estat:
                         st.error(f"Erro ao processar estatísticas de '{col_estat_sel}': {e_estat}")
-
