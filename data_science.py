@@ -11,13 +11,55 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
-def formatar_valor(valor, prefixo="R$ "):
+def eh_coluna_monetaria(nome_coluna):
+    """
+    Identifica de forma inteligente se uma coluna representa valores monetários (moeda/R$).
+    Evita falsos-positivos em variáveis de quantidade, tempo, idade, scores, etc.
+    """
+    if not nome_coluna or not isinstance(nome_coluna, str):
+        return False
+
+    col = nome_coluna.lower().strip()
+
+    # Termos expressamente monetários (alta prioridade)
+    termos_monetarios_diretos = [
+        'nota_fiscal', 'faturamento', 'receita', 'despesa', 'lucro',
+        'salario', 'salário', 'ticket', 'total_pago', 'frete',
+        'orcamento', 'orçamento', 'dinheiro', 'r$', 'price', 'cost',
+        'revenue', 'fee', 'salary', 'budget', 'sales', 'spend'
+    ]
+    if any(m in col for m in termos_monetarios_diretos):
+        return True
+
+    # Termos que expressamente indicam contagem, tempo, idade ou índices
+    termos_nao_monetarios = [
+        'quantidade', 'qtd', 'volume', 'count', 'numero', 'número', 'num_', '_num',
+        'horas', 'hora', 'tempo', 'minutos', 'segundos', 'dias',
+        'idade', 'age', 'ano', 'mes', 'mês', 'dia',
+        'score', 'pontuacao', 'pontuação', 'indice', 'índice', 'ansiedade',
+        'taxa', 'rate', 'pct', 'percent', '%', 'foco', 'sono',
+        'grau', 'aluno', 'id', 'codigo', 'código', 'cep', 'periodo', 'seq'
+    ]
+    if any(t in col for t in termos_nao_monetarios):
+        return False
+
+    # Termos gerais monetários (como 'valor' ou 'preco')
+    if any(m in col for m in ['valor', 'preco', 'preço', 'custo']):
+        return True
+
+    return False
+
+
+def obter_prefixo_coluna(nome_coluna):
+    """Retorna 'R$ ' se a coluna for monetária, ou '' caso contrário."""
+    return "R$ " if eh_coluna_monetaria(nome_coluna) else ""
+
+
+def formatar_valor(valor, prefixo=None, nome_coluna=None):
     """
     Formata valores monetários ou numéricos no padrão brasileiro.
-    Exemplos:
-        1500000 -> R$ 1,50M
-        1500    -> R$ 1.500
-        15.5    -> R$ 15,50
+    Se nome_coluna for informado e prefixo for None, detecta automaticamente se é monetário ('R$ ') ou numérico comum ('').
+    Se nem prefixo nem nome_coluna forem fornecidos, o padrão é sem prefixo ('') para evitar rotular dados gerais como R$.
     """
     if valor is None or pd.isna(valor):
         return "N/A"
@@ -26,6 +68,9 @@ def formatar_valor(valor, prefixo="R$ "):
     except (ValueError, TypeError):
         return str(valor)
 
+    if prefixo is None:
+        prefixo = obter_prefixo_coluna(nome_coluna) if nome_coluna else ""
+
     sinal = "-" if val < 0 else ""
     val_abs = abs(val)
 
@@ -33,9 +78,14 @@ def formatar_valor(valor, prefixo="R$ "):
         texto = f"{prefixo}{sinal}{val_abs / 1_000_000:,.2f}M"
         return texto.replace(",", "X").replace(".", ",").replace("X", ".")
     elif val_abs >= 1_000:
-        texto = f"{prefixo}{sinal}{val_abs:,.0f}"
-        return texto.replace(",", ".")
+        if val_abs.is_integer() and not prefixo:
+            return f"{sinal}{int(val_abs):,}".replace(",", ".")
+        texto = f"{prefixo}{sinal}{val_abs:,.2f}" if (val_abs % 1 != 0) else f"{prefixo}{sinal}{val_abs:,.0f}"
+        return texto.replace(",", "X").replace(".", ",").replace("X", ".")
     else:
+        # Se for inteiro exato e sem prefixo monetário (ex: idade 16), formata como inteiro
+        if val_abs.is_integer() and not prefixo:
+            return f"{sinal}{int(val_abs)}"
         texto = f"{prefixo}{sinal}{val_abs:.2f}"
         return texto.replace(".", ",")
 
