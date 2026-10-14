@@ -1432,3 +1432,4 @@ else:
 
                     except Exception as e_estat:
                         st.error(f"Erro ao processar estatísticas de '{col_estat_sel}': {e_estat}")
+
