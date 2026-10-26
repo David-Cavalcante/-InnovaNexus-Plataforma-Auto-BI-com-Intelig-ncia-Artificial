@@ -180,7 +180,6 @@ def executar_etl_automatico(df_raw):
     duplicatas_removidas = int(df_clean.duplicated().sum())
     df_clean = df_clean.drop_duplicates()
 
-    # Limpeza segura de espaços em textos SEM transformar NaN na string literal 'nan'
     colunas_texto = df_clean.select_dtypes(include=['object']).columns
     for col in colunas_texto:
         df_clean[col] = df_clean[col].where(
@@ -189,10 +188,8 @@ def executar_etl_automatico(df_raw):
         )
         df_clean[col] = df_clean[col].replace({'': np.nan, 'nan': np.nan, 'None': np.nan, 'null': np.nan})
 
-    # Registra a contagem real de valores ausentes antes da imputação automática
     nulos_originais = df_clean.isnull().sum().to_dict()
 
-    # Identificação inteligente de datas
     for col in df_clean.columns:
         col_lower = col.lower()
         eh_duracao_ou_numero = any(p in col_lower for p in [
@@ -204,7 +201,6 @@ def executar_etl_automatico(df_raw):
             except Exception:
                 pass
 
-    # Garante conversão de colunas numéricas conhecidas
     for col in df_clean.columns:
         if any(p in col.lower() for p in ['tempo_', 'horas_', 'uso_ia', 'pontuacao_', 'indice_', 'idade', 'score', 'ability', 'skills']):
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
@@ -224,7 +220,6 @@ def executar_etl_automatico(df_raw):
             .fillna(0)
         )
 
-    # Tratamento de valores ausentes (Imputação)
     for col in df_clean.columns:
         if df_clean[col].isnull().sum() > 0:
             if pd.api.types.is_numeric_dtype(df_clean[col]):
@@ -234,7 +229,6 @@ def executar_etl_automatico(df_raw):
             else:
                 df_clean[col] = df_clean[col].fillna("Não informado")
 
-    # Extrai Ano e Mês de colunas datetime
     colunas_datas = df_clean.select_dtypes(include=['datetime64[ns]', 'datetime64']).columns
     for col in colunas_datas:
         prefixo = col.replace('_datetime', '').replace('_date', '').replace('_data', '')
@@ -270,7 +264,133 @@ def carregar_dados_sql(db_type, host, port, user, password, database, tabela):
         return None, str(e)
 
 # ---------------------------------------------------------
-# INTEGRAÇÃO COM IA MULTIMOTOR
+# MOTOR ANALÍTICO NATIVO (CONTINGÊNCIA / OFFLINE BASEADO NOS DADOS)
+# ---------------------------------------------------------
+def gerar_parecer_estatistico_local(df, tipo_analise="Automático (Geral)", pergunta_usuario=""):
+    """
+    Gera um relatório executivo completo e fiel aos dados diretamente a partir
+    dos cálculos estatísticos do DataFrame (KPIs, correlações, quartis e categorias).
+    Garante funcionamento 100% mesmo sem internet ou cota de API externa.
+    """
+    n_linhas, n_cols = df.shape
+    todas_num = df.select_dtypes(include=['number']).columns.tolist()
+    col_num = [
+        c for c in todas_num
+        if c.lower() not in ('row_id', 'id', 'index', 'codigo', 'código') and not c.lower().endswith('_ano')
+    ] or todas_num
+    col_cat = [
+        c for c in df.select_dtypes(include=['object', 'category']).columns.tolist()
+        if 'id' not in c.lower()
+    ]
+
+    # 1. Construir tabela de KPIs
+    linhas_kpi = [
+        "| Indicador / Métrica | Média | Mediana | Intervalo (Mín – Máx) | Coef. Variação (CV) |",
+        "| :--- | :---: | :---: | :---: | :---: |"
+    ]
+    for c in col_num[:8]:
+        s = pd.to_numeric(df[c], errors='coerce').dropna()
+        if len(s) > 0:
+            pref = obter_prefixo_coluna(c)
+            media = s.mean()
+            mediana = s.median()
+            cv = (s.std() / abs(media) * 100) if media != 0 else 0.0
+            linhas_kpi.append(
+                f"| **{c}** | {formatar_valor(media, prefixo=pref)} | {formatar_valor(mediana, prefixo=pref)} | "
+                f"{formatar_valor(s.min(), prefixo=pref)} – {formatar_valor(s.max(), prefixo=pref)} | {cv:.1f}% |"
+            )
+    tabela_kpis = "\n".join(linhas_kpi)
+
+    # 2. Identificar maiores correlações positivas e negativas
+    diag_correlacao = "A base possui apenas uma variável numérica para análise."
+    if len(col_num) >= 2:
+        corr_m = df[col_num].corr()
+        pares = []
+        for i in range(len(col_num)):
+            for j in range(i + 1, len(col_num)):
+                val_c = corr_m.iloc[i, j]
+                if not pd.isna(val_c):
+                    pares.append((col_num[i], col_num[j], float(val_c)))
+        if pares:
+            pares_ord = sorted(pares, key=lambda x: abs(x[2]), reverse=True)
+            c1, c2, r_max = pares_ord[0]
+            tipo_rel = "positiva (crescimento conjunto)" if r_max > 0 else "inversa/negativa (quando uma sobe, a outra cai)"
+            diag_correlacao = (
+                f"A relação estatística mais forte do dataset ocorre entre **`{c1}`** e **`{c2}`**, "
+                f"com coeficiente de Pearson **$r = {r_max:.3f}$** — indicando uma relação {tipo_rel}."
+            )
+            if len(pares_ord) > 1:
+                c3, c4, r_sec = pares_ord[1]
+                diag_correlacao += f" Em segundo lugar, destaca-se o par **`{c3}`** vs **`{c4}`** ($r = {r_sec:.3f}$)."
+
+    # 3. Diagnóstico de Categorias e Segmentos
+    diag_categoria = ""
+    if col_cat and col_num:
+        cat_prin = col_cat[0]
+        num_prin = col_num[0]
+        pref_p = obter_prefixo_coluna(num_prin)
+        grp = df.groupby(cat_prin)[num_prin].mean().sort_values(ascending=False)
+        if len(grp) >= 2:
+            top_cat, top_val = grp.index[0], grp.iloc[0]
+            low_cat, low_val = grp.index[-1], grp.iloc[-1]
+            diag_categoria = (
+                f"Ao segmentar **`{num_prin}`** pela categoria **`{cat_prin}`**, o grupo líder é "
+                f"**{top_cat}** (média de **{formatar_valor(top_val, prefixo=pref_p)}**), enquanto o menor índice "
+                f"ocorre em **{low_cat}** (média de **{formatar_valor(low_val, prefixo=pref_p)}**)."
+            )
+
+    # 4. Diagnóstico de Outliers (IQR)
+    diag_outliers = ""
+    if col_num:
+        c_out = col_num[0]
+        est = calcular_estatisticas_resumo(df[c_out])
+        diag_outliers = (
+            f"Na métrica principal **`{c_out}`**, foram identificados **{est['outliers_iqr_count']:,} registros atípicos (outliers)** "
+            f"pelo critério de Tukey/IQR ({est['outliers_iqr_pct']:.2f}% da base), fora dos limites de "
+            f"{formatar_valor(est['limite_inferior'], nome_coluna=c_out)} a {formatar_valor(est['limite_superior'], nome_coluna=c_out)}."
+        )
+
+    foco_cabecalho = (
+        f"**Foco Solicitado:** {tipo_analise}" + (f" | **Pergunta:** *{pergunta_usuario.strip()}*" if pergunta_usuario.strip() else "")
+        if (pergunta_usuario.strip() or tipo_analise != "Automático (Geral)")
+        else "Monitorar padrões estruturais, correlações críticas, desvios operacionais e oportunidades estratégicas."
+    )
+
+    relatorio = f"""# InnovaNexus - Relatório Executivo de Dados
+*Parecer Prescritivo de Negócio, Diagnóstico de ETL e Visualização de Indicadores*
+
+---
+
+> **🎯 Objetivo Estratégico:** {foco_cabecalho}
+
+---
+
+## 📊 1. Indicadores-Chave de Desempenho (KPIs)
+
+Base analisada: **{n_linhas:,} registros ativos** distribuídos em **{n_cols} colunas** auditadas via ETL.
+
+{tabela_kpis}
+
+---
+
+## 💡 2. Insights Estratégicos e Diagnóstico dos Dados
+
+1. **Correlação Estrutural e Dependência entre Variáveis:** {diag_correlacao}
+2. **Assimetria entre Segmentos e Categorias:** {diag_categoria if diag_categoria else 'As variáveis apresentam distribuição homogênea entre os grupos avaliados.'}
+3. **Mapeamento de Risco e Outliers (Critério IQR):** {diag_outliers}
+
+---
+
+## 🚀 3. Ações Prescritivas e Recomendações
+
+1. **Intervenção Direcionada nos Indicadores Críticos:** Priorizar planos de ação sobre as variáveis de maior correlação identificadas acima, atuando preventivamente nos segmentos que apresentam maior desgaste ou queda de desempenho.
+2. **Política de Limites e Monitoramento Contínuo (Thresholds):** Estabelecer alertas automáticos para registros que ultrapassem o 3º Quartil ($Q_3$) e o Percentil 95, mitigando o efeito dos *outliers* detectados.
+3. **Acompanhamento Preditivo Periódico:** Utilizar a aba de **Ciência de Dados & Regressão** do InnovaNexus para revisar mensalmente a inclinação da reta de tendência ($R^2$) e antecipar gargalos futuros.
+"""
+    return relatorio
+
+# ---------------------------------------------------------
+# INTEGRAÇÃO COM IA MULTIMOTOR (AUTO-DESCOBERTA DE MODELOS)
 # ---------------------------------------------------------
 def construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_analise="Automático (Geral)", pergunta_usuario=""):
     info_safe = df_info_str[:1500]
@@ -280,7 +400,7 @@ def construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_an
     eh_sob_demanda = bool(pergunta_usuario and pergunta_usuario.strip()) or (tipo_analise and tipo_analise != "Automático (Geral)")
 
     if not eh_sob_demanda:
-        prompt = (
+        return (
             "Atue como um Especialista em Analytics e Designer de Relatórios Executivos.\n"
             "Analise a estrutura de dados fornecida abaixo e gere um parecer estruturado "
             "estritamente em Português do Brasil de alto nível executivo e estratégico.\n\n"
@@ -308,7 +428,7 @@ def construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_an
         foco_tipo = f"- **Foco da Análise Solicitada:** {tipo_analise}\n" if tipo_analise and tipo_analise != "Automático (Geral)" else ""
         foco_pergunta = f"- **Pergunta / Insight Específico Desejado:** {pergunta_usuario.strip()}\n" if pergunta_usuario and pergunta_usuario.strip() else ""
 
-        prompt = (
+        return (
             "Atue como um Especialista em Ciência de Dados, Analytics e Inteligência de Negócios.\n"
             "O usuário solicitou uma ANÁLISE SOB DEMANDA específica sobre o dataset enviado.\n"
             "Sua resposta deve ser gerada estritamente a partir dos dados fornecidos e refletir com precisão o que foi solicitado.\n\n"
@@ -334,134 +454,214 @@ def construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_an
             f"Resumo Estatístico:\n{desc_safe}\n\n"
             f"Amostra de Dados:\n{head_safe}\n"
         )
-    return prompt
 
-def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str, tipo_analise="Automático (Geral)", pergunta_usuario=""):
+
+def chamar_api_groq(key_groq, system_msg, prompt):
+    """
+    Descobre dinamicamente quais modelos estão liberados na conta Groq do usuário
+    via REST API e executa a geração no primeiro modelo de texto compatível.
+    """
+    headers = {
+        "Authorization": f"Bearer {key_groq}",
+        "Content-Type": "application/json"
+    }
+
+    # 1. Descobrir modelos reais disponíveis para esta chave
+    modelos_Preferidos = [
+        "llama-3.3-70b-versatile",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "qwen/qwen3-32b",
+        "qwen-qwq-32b",
+        "deepseek-r1-distill-llama-70b",
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it",
+        "compound-beta",
+        "llama3-70b-8192",
+        "llama3-8b-8192",
+    ]
+    modelos_para_testar = []
+
     try:
+        r_models = requests.get("https://api.groq.com/openai/v1/models", headers=headers, timeout=15)
+        if r_models.status_code == 401:
+            return None, "❌ Chave Groq inválida ou expirada (HTTP 401). Verifique se a chave começa com 'gsk_' em https://console.groq.com/keys."
+        if r_models.status_code == 200:
+            dados_m = r_models.json().get("data", [])
+            ids_conta = [
+                m.get("id", "") for m in dados_m
+                if m.get("id") and not any(ign in m.get("id", "").lower() for ign in [
+                    "whisper", "tts", "playai", "guard", "safeguard", "embed", "vision-preview"
+                ])
+            ]
+            for mp in modelos_Preferidos:
+                if mp in ids_conta:
+                    modelos_para_testar.append(mp)
+            for id_c in ids_conta:
+                if id_c not in modelos_para_testar:
+                    modelos_para_testar.append(id_c)
+    except Exception:
+        pass
+
+    if not modelos_para_testar:
+        modelos_para_testar = modelos_Preferidos
+
+    erros_modelos = []
+    for mod in modelos_para_testar:
+        payload = {
+            "model": mod,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 2048,
+            "temperature": 0.6
+        }
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=45
+            )
+            if resp.status_code == 200:
+                choices = resp.json().get("choices", [])
+                if choices:
+                    texto = choices[0].get("message", {}).get("content", "")
+                    if texto:
+                        return texto, None
+            elif resp.status_code == 401:
+                return None, "❌ Chave Groq inválida (HTTP 401). Gere uma nova chave 'gsk_...' em https://console.groq.com/keys."
+            else:
+                try:
+                    det = resp.json().get("error", {}).get("message", resp.text[:150])
+                except Exception:
+                    det = resp.text[:150]
+                erros_modelos.append(f"{mod}: {det}")
+                continue
+        except Exception as e_req:
+            erros_modelos.append(f"{mod}: {str(e_req)}")
+            continue
+
+    resumo_erros = " | ".join(erros_modelos[:3])
+    return None, (
+        f"❌ Não foi possível gerar resposta nos modelos da Groq ({resumo_erros}).\n\n"
+        "💡 **Como verificar no Console da Groq:** Acesse `https://console.groq.com/settings/limits` e verifique se os modelos Llama estão habilitados no seu projeto."
+    )
+
+
+def chamar_api_gemini(key_gemini, system_msg, prompt):
+    """
+    Descobre dinamicamente os modelos Gemini habilitados para a chave do usuário
+    via endpoint REST oficial v1beta/models e executa generateContent.
+    """
+    headers = {"Content-Type": "application/json"}
+    modelos_preferidos = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash-lite",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+        "gemini-1.5-flash",
+    ]
+    modelos_para_testar = []
+
+    # 1. Consultar a lista oficial de modelos que a chave do usuário tem acesso
+    try:
+        url_lista = f"https://generativelanguage.googleapis.com/v1beta/models?key={key_gemini}"
+        r_list = requests.get(url_lista, timeout=15)
+        if r_list.status_code in (400, 403):
+            try:
+                msg_err = r_list.json().get("error", {}).get("message", r_list.text[:200])
+            except Exception:
+                msg_err = r_list.text[:200]
+            return None, f"❌ Chave Gemini recusada pela Google (HTTP {r_list.status_code}): {msg_err}"
+        if r_list.status_code == 200:
+            lista_m = r_list.json().get("models", [])
+            disponiveis = []
+            for m in lista_m:
+                metodos = m.get("supportedGenerationMethods", [])
+                nome_m = m.get("name", "").replace("models/", "")
+                if "generateContent" in metodos and "tts" not in nome_m and "image" not in nome_m and "embedding" not in nome_m:
+                    disponiveis.append(nome_m)
+            for mp in modelos_preferidos:
+                if mp in disponiveis:
+                    modelos_para_testar.append(mp)
+            for disp in disponiveis:
+                if disp not in modelos_para_testar:
+                    modelos_para_testar.append(disp)
+    except Exception:
+        pass
+
+    if not modelos_para_testar:
+        modelos_para_testar = modelos_preferidos
+
+    payload = {
+        "contents": [
+            {"role": "user", "parts": [{"text": f"{system_msg}\n\n{prompt}"}]}
+        ],
+        "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.6}
+    }
+
+    erros_gemini = []
+    for mod in modelos_para_testar:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{mod}:generateContent?key={key_gemini}"
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=45)
+            if resp.status_code == 200:
+                dados = resp.json()
+                candidatos = dados.get("candidates", [])
+                if candidatos:
+                    partes = candidatos[0].get("content", {}).get("parts", [])
+                    if partes and partes[0].get("text"):
+                        return partes[0].get("text"), None
+            elif resp.status_code == 429:
+                erros_gemini.append(f"{mod}: Limite de cota atingido (429)")
+                continue
+            else:
+                try:
+                    det = resp.json().get("error", {}).get("message", resp.text[:150])
+                except Exception:
+                    det = resp.text[:150]
+                erros_gemini.append(f"{mod} (HTTP {resp.status_code}): {det}")
+                continue
+        except Exception as e_req:
+            erros_gemini.append(f"{mod}: {str(e_req)}")
+            continue
+
+    resumo_erros = " | ".join(erros_gemini[:3])
+    return None, f"❌ Falha na API Gemini ({resumo_erros}). Verifique sua chave em https://aistudio.google.com/apikey."
+
+
+def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str, tipo_analise="Automático (Geral)", pergunta_usuario="", df_ref=None):
+    """
+    Roteador inteligente de IA com auto-detecção de chave (gsk_ vs AIza) e
+    auto-descoberta de modelos ativos na conta do usuário.
+    """
+    try:
+        if motor == "Motor Analítico Nativo (Offline / Sem Chave)" and df_ref is not None:
+            return gerar_parecer_estatistico_local(df_ref, tipo_analise, pergunta_usuario), None
+
+        chave = (api_key or "").strip()
+        if not chave:
+            return None, f"🔑 Chave de API não informada para **{motor}**. Insira a chave na barra lateral ou selecione o **Motor Analítico Nativo**."
+
         prompt = construir_prompt_insights(df_info_str, df_describe_str, df_head_str, tipo_analise, pergunta_usuario)
         system_msg = "Você é um analista de dados sênior especialista em business intelligence e ciência de dados."
 
-        # ── 1. MOTOR GROQ ─────────────────────────────────────────────────────
-        if motor == "Groq (Rápido/Gratuito)":
-            key_groq = api_key.strip()
-            if not key_groq:
-                return None, (
-                    "🔑 Chave Groq não configurada.\n\n"
-                    "Obtenha uma chave gratuita em https://console.groq.com/keys "
-                    "e insira-a no campo 'Chave de API' no painel lateral."
-                )
+        # Auto-detecção inteligente caso o usuário tenha colado chave Gemini no seletor Groq ou vice-versa
+        if chave.startswith("AIza") or chave.startswith("AQ."):
+            motor_efetivo = "Gemini (Google)"
+        elif chave.startswith("gsk_"):
+            motor_efetivo = "Groq (Rápido/Gratuito)"
+        else:
+            motor_efetivo = motor
 
-            client = OpenAI(
-                api_key=key_groq,
-                base_url="https://api.groq.com/openai/v1"
-            )
-
-            modelos_groq = [
-                "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-            ]
-
-            ultimo_erro = None
-            for modelo in modelos_groq:
-                try:
-                    response = client.chat.completions.create(
-                        model=modelo,
-                        messages=[
-                            {"role": "system", "content": system_msg},
-                            {"role": "user",   "content": prompt}
-                        ],
-                        max_tokens=2048,
-                        temperature=0.7,
-                        stream=False
-                    )
-                    if response and response.choices and len(response.choices) > 0:
-                        return response.choices[0].message.content, None
-                except Exception as e:
-                    err_str = str(e)
-                    ultimo_erro = err_str
-                    if "401" in err_str or "authentication" in err_str.lower() or "invalid_api_key" in err_str.lower():
-                        return None, (
-                            "❌ Chave Groq inválida ou expirada (erro 401).\n\n"
-                            "Obtenha uma nova chave em:\n"
-                            "➡️ https://console.groq.com/keys\n\n"
-                            "A chave começa com **gsk_** — cole-a no campo 'Chave de API' na sidebar."
-                        )
-                    continue
-
-            return None, (
-                f"❌ Erro na API da Groq: {ultimo_erro}\n\n"
-                "Verifique sua chave em https://console.groq.com/keys e confirme se ela possui cota disponível."
-            )
-
-        # ── 2. MOTOR GEMINI ───────────────────────────────────────────────────
-        elif motor == "Gemini (Google)":
-            key = api_key.strip()
-            if not key:
-                return None, (
-                    "🔑 Chave Gemini não configurada.\n\n"
-                    "Obtenha uma chave no Google AI Studio em https://aistudio.google.com/apikey"
-                )
-
-            # Tenta via SDK oficial google-genai (models.generate_content)
-            try:
-                from google import genai as ggenai
-                gc = ggenai.Client(api_key=key)
-                for modelo_sdk in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
-                    try:
-                        resp_sdk = gc.models.generate_content(
-                            model=modelo_sdk,
-                            contents=f"{system_msg}\n\n{prompt}"
-                        )
-                        if resp_sdk and getattr(resp_sdk, "text", None):
-                            return resp_sdk.text, None
-                    except Exception as e_sdk:
-                        if any(t in str(e_sdk).lower() for t in ["not found", "404", "deprecated"]):
-                            continue
-                        break
-            except Exception:
-                pass
-
-            # Fallback REST API direta
-            modelos_rest = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-            headers = {'Content-Type': 'application/json'}
-            payload = {
-                "contents": [
-                    {"role": "user", "parts": [{"text": f"{system_msg}\n\n{prompt}"}]}
-                ],
-                "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.7}
-            }
-
-            for modelo_rest in modelos_rest:
-                url = (
-                    f"https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{modelo_rest}:generateContent?key={key}"
-                )
-                try:
-                    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-                    if resp.status_code == 200:
-                        dados = resp.json()
-                        candidatos = dados.get("candidates", [])
-                        if candidatos:
-                            partes = candidatos[0].get("content", {}).get("parts", [])
-                            if partes:
-                                return partes[0].get("text", ""), None
-                        return None, "Resposta vazia do Gemini. Tente novamente."
-                    elif resp.status_code in (404, 400):
-                        continue
-                    elif resp.status_code == 403:
-                        return None, "❌ Acesso negado (HTTP 403). Verifique se a chave do Google AI Studio é válida."
-                    elif resp.status_code == 429:
-                        return None, "⏳ Limite de requisições atingido (quota). Aguarde 1 minuto e tente novamente."
-                    else:
-                        try:
-                            msg = resp.json().get('error', {}).get('message', resp.text[:300])
-                        except Exception:
-                            msg = resp.text[:300]
-                        return None, f"Erro HTTP {resp.status_code} da API Gemini: {msg}"
-                except Exception as e_rest:
-                    return None, f"Erro ao chamar o Gemini: {str(e_rest)}"
-
-            return None, "Nenhum modelo Gemini respondeu. Confirme que sua chave está ativa em aistudio.google.com."
+        if motor_efetivo == "Groq (Rápido/Gratuito)":
+            return chamar_api_groq(chave, system_msg, prompt)
+        elif motor_efetivo == "Gemini (Google)":
+            return chamar_api_gemini(chave, system_msg, prompt)
 
         return None, "Motor de IA não reconhecido."
 
@@ -497,34 +697,43 @@ else:
     st.sidebar.header("🤖 Motor de Inteligência Artificial")
     motor_selecionado = st.sidebar.selectbox(
         "Selecione o serviço de IA:",
-        ["Groq (Rápido/Gratuito)", "Gemini (Google)"]
+        [
+            "Groq (Rápido/Gratuito)",
+            "Gemini (Google)",
+            "Motor Analítico Nativo (Offline / Sem Chave)"
+        ]
     )
 
-    chave_personalizada = st.sidebar.text_input(
-        "Chave de API (Opcional)",
-        type="password",
-        help="Deixe em branco para usar a chave configurada no sistema para o motor selecionado."
-    )
+    if motor_selecionado != "Motor Analítico Nativo (Offline / Sem Chave)":
+        chave_personalizada = st.sidebar.text_input(
+            "Chave de API",
+            type="password",
+            help="Cole aqui sua chave da Groq (começa com gsk_) ou do Gemini (começa com AIza). O sistema reconhece automaticamente o provedor."
+        )
+        chave_ativa = chave_personalizada.strip() if chave_personalizada.strip() else CHAVES_PADRAO.get(motor_selecionado, "")
+        chave_valida = bool(chave_ativa)
 
-    chave_ativa = chave_personalizada.strip() if chave_personalizada.strip() else CHAVES_PADRAO.get(motor_selecionado, "")
-    chave_valida = bool(chave_ativa)
+        # Aviso inteligente se colou a chave trocada
+        if chave_ativa.startswith("AIza") and motor_selecionado == "Groq (Rápido/Gratuito)":
+            st.sidebar.info("🔄 Chave **Gemini (`AIza...`)** detectada! O sistema usará a API do Google Gemini automaticamente.")
+        elif chave_ativa.startswith("gsk_") and motor_selecionado == "Gemini (Google)":
+            st.sidebar.info("🔄 Chave **Groq (`gsk_...`)** detectada! O sistema usará a API da Groq automaticamente.")
 
-    if motor_selecionado == "Gemini (Google)":
         if chave_valida:
-            st.sidebar.success("✅ API Gemini: Pronta")
+            st.sidebar.success("✅ Chave de API Pronta")
         else:
-            st.sidebar.warning("⚠️ Chave Gemini não configurada. Insira sua chave do Google AI Studio.")
+            st.sidebar.warning(f"⚠️ Insira a chave de API ou escolha o Motor Analítico Nativo.")
+
+        links_chave = {
+            "Groq (Rápido/Gratuito)": "https://console.groq.com/keys",
+            "Gemini (Google)":        "https://aistudio.google.com/apikey",
+        }
+        if motor_selecionado in links_chave:
+            st.sidebar.caption(f"🔑 [Obter chave {motor_selecionado.split()[0]}]({links_chave[motor_selecionado]})")
     else:
-        if chave_valida:
-            st.sidebar.success(f"✅ API {motor_selecionado.split()[0]}: Pronta")
-        else:
-            st.sidebar.warning(f"⚠️ Chave {motor_selecionado.split()[0]} não configurada.")
-
-    links_chave = {
-        "Groq (Rápido/Gratuito)": "https://console.groq.com/keys",
-        "Gemini (Google)":        "https://aistudio.google.com/apikey",
-    }
-    st.sidebar.caption(f"🔑 [Obter chave {motor_selecionado.split()[0]}]({links_chave[motor_selecionado]})")
+        chave_ativa = "NATIVO"
+        chave_valida = True
+        st.sidebar.success("✅ Motor Analítico Nativo Ativo (Não requer chave externa)")
 
     # ── FONTE DE DADOS ─────────────────────────────────────────────────────────
     st.markdown("---")
@@ -625,7 +834,6 @@ else:
     if df is not None and not df.empty:
         st.markdown("---")
 
-        # Identificação inteligente de colunas numéricas (exclui IDs puros do topo)
         todas_num = df.select_dtypes(include=['number']).columns.tolist()
         col_num = [
             c for c in todas_num
@@ -644,7 +852,6 @@ else:
 
         col_data = df.select_dtypes(include=['datetime64[ns]', 'datetime64']).columns.tolist()
 
-        # Auditoria de nulos originais tratados pelo ETL
         nulos_orig_map = df.attrs.get('nulos_originais', {})
         nulos_orig_series = pd.Series([nulos_orig_map.get(c, 0) for c in df.columns], index=df.columns)
         total_nulos_tratados = int(nulos_orig_series.sum())
@@ -782,51 +989,52 @@ else:
 
             st.markdown("---")
 
-            if not chave_valida:
-                st.error(
-                    f"⚠️ Configure uma Chave de API válida para o motor **{motor_selecionado}** "
-                    f"no painel lateral esquerdo."
-                )
-            else:
-                btn_texto = "✨ Gerar Parecer Executivo Automático" if modo_analise == "Automático (Padrão)" else "🎯 Gerar Análise Sob Demanda"
-                if st.button(btn_texto, type="primary"):
-                    with st.spinner(f"A processar dados via {motor_selecionado}... Aguarde."):
-                        info_str     = info_df.to_string(index=False)
-                        describe_str = df[col_num].describe().T.to_string() if col_num else "Nenhuma variável numérica."
-                        head_str     = df.head(5).to_string(index=False)
+            btn_texto = "✨ Gerar Parecer Executivo Automático" if modo_analise == "Automático (Padrão)" else "🎯 Gerar Análise Sob Demanda"
+            if st.button(btn_texto, type="primary"):
+                with st.spinner(f"A processar dados via {motor_selecionado}... Aguarde."):
+                    info_str     = info_df.to_string(index=False)
+                    describe_str = df[col_num].describe().T.to_string() if col_num else "Nenhuma variável numérica."
+                    head_str     = df.head(5).to_string(index=False)
 
-                        insights, erro_ia = gerar_insights_ia(
-                            motor_selecionado, chave_ativa, info_str, describe_str, head_str,
-                            tipo_analise=tipo_analise_input,
-                            pergunta_usuario=pergunta_usuario_input
+                    insights, erro_ia = gerar_insights_ia(
+                        motor_selecionado, chave_ativa, info_str, describe_str, head_str,
+                        tipo_analise=tipo_analise_input,
+                        pergunta_usuario=pergunta_usuario_input,
+                        df_ref=df
+                    )
+
+                    if erro_ia:
+                        st.warning(
+                            f"⚠️ A API externa retornou um aviso ({erro_ia})\n\n"
+                            "✅ **Contingência Inteligente Ativada:** O parecer abaixo foi gerado automaticamente pelo **Motor Analítico Nativo do InnovaNexus** diretamente a partir das estatísticas do seu dataset!"
                         )
+                        st.session_state['insights_ia'] = gerar_parecer_estatistico_local(
+                            df, tipo_analise_input, pergunta_usuario_input
+                        )
+                    else:
+                        st.session_state['insights_ia'] = insights
 
-                        if erro_ia:
-                            st.error(f"❌ Falha ao gerar parecer:\n\n{erro_ia}")
-                        else:
-                            st.session_state['insights_ia'] = insights
+            if 'insights_ia' in st.session_state:
+                st.markdown(st.session_state['insights_ia'])
 
-                if 'insights_ia' in st.session_state:
-                    st.markdown(st.session_state['insights_ia'])
-
-                    if col_num and col_cat:
-                        try:
-                            var_num_pdf = st.session_state.get('dash_var_num', col_num[0])
-                            var_cat_pdf = st.session_state.get('dash_var_cat', col_cat[0])
-                            pdf_data = gerar_pdf_executivo(
-                                df.shape[0], df.shape[1],
-                                total_nulos_tratados,
-                                st.session_state['insights_ia'],
-                                df, var_num_pdf, var_cat_pdf
-                            )
-                            st.download_button(
-                                "📥 Baixar Relatório PDF Executivo",
-                                data=pdf_data,
-                                file_name="InnovaNexus_Relatorio.pdf",
-                                mime="application/pdf"
-                            )
-                        except Exception as e:
-                            st.warning(f"PDF não gerado: {e}")
+                if col_num and col_cat:
+                    try:
+                        var_num_pdf = st.session_state.get('dash_var_num', col_num[0])
+                        var_cat_pdf = st.session_state.get('dash_var_cat', col_cat[0])
+                        pdf_data = gerar_pdf_executivo(
+                            df.shape[0], df.shape[1],
+                            total_nulos_tratados,
+                            st.session_state['insights_ia'],
+                            df, var_num_pdf, var_cat_pdf
+                        )
+                        st.download_button(
+                            "📥 Baixar Relatório PDF Executivo",
+                            data=pdf_data,
+                            file_name="InnovaNexus_Relatorio.pdf",
+                            mime="application/pdf"
+                        )
+                    except Exception as e:
+                        st.warning(f"PDF não gerado: {e}")
 
         # ── TAB 4: DASHBOARD INTERATIVO ────────────────────────────────────────
         with tab_dash:
