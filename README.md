@@ -61,7 +61,7 @@ No terminal, execute o comando:
 
 Bash
 python -m streamlit run app.py
-Acesse no seu navegador através de: http://localhost:8501
+Acesse no seu navegador através de: [http://localhost:8501](https://innovanexus.streamlit.app/)
 
 🔑 Credenciais de Acesso de Demonstração (Banca)
 Para acessar o portal executivo na tela de login:
