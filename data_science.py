@@ -21,33 +21,29 @@ def eh_coluna_monetaria(nome_coluna):
 
     col = nome_coluna.lower().strip()
 
-    # Termos expressamente monetários (alta prioridade)
-    termos_monetarios_diretos = [
-        'nota_fiscal', 'faturamento', 'receita', 'despesa', 'lucro',
-        'salario', 'salário', 'ticket', 'total_pago', 'frete',
-        'orcamento', 'orçamento', 'dinheiro', 'r$', 'price', 'cost',
-        'revenue', 'fee', 'salary', 'budget', 'sales', 'spend'
-    ]
-    if any(m in col for m in termos_monetarios_diretos):
-        return True
-
-    # Termos que expressamente indicam contagem, tempo, idade ou índices
+    # Termos que expressamente indicam contagem, tempo, idade, cognição ou índices (Prioridade de Exclusão)
     termos_nao_monetarios = [
         'quantidade', 'qtd', 'volume', 'count', 'numero', 'número', 'num_', '_num',
-        'horas', 'hora', 'tempo', 'minutos', 'segundos', 'dias',
-        'idade', 'age', 'ano', 'mes', 'mês', 'dia',
-        'score', 'pontuacao', 'pontuação', 'indice', 'índice', 'ansiedade',
-        'taxa', 'rate', 'pct', 'percent', '%', 'foco', 'sono',
+        'horas', 'hora', 'tempo', 'minutos', 'segundos', 'dias', 'hours', 'minutes',
+        'idade', 'age', 'ano', 'mes', 'mês', 'dia', 'year', 'month',
+        'score', 'pontuacao', 'pontuação', 'indice', 'índice', 'ansiedade', 'index',
+        'taxa', 'rate', 'pct', 'percent', '%', 'foco', 'sono', 'ability', 'skills',
+        'intelligence', 'speed', 'involvement', 'quality', 'load', 'wellbeing',
+        'proficiency', 'adaptability', 'span', 'creativity', 'thinking',
         'grau', 'aluno', 'id', 'codigo', 'código', 'cep', 'periodo', 'seq'
     ]
     if any(t in col for t in termos_nao_monetarios):
         return False
 
-    # Termos gerais monetários (como 'valor' ou 'preco')
-    if any(m in col for m in ['valor', 'preco', 'preço', 'custo']):
-        return True
-
-    return False
+    # Termos expressamente monetários
+    termos_monetarios_diretos = [
+        'nota_fiscal', 'faturamento', 'receita', 'despesa', 'lucro',
+        'salario', 'salário', 'ticket', 'total_pago', 'frete',
+        'orcamento', 'orçamento', 'dinheiro', 'r$', 'price', 'cost',
+        'revenue', 'fee', 'salary', 'budget', 'sales', 'spend',
+        'valor', 'preco', 'preço', 'custo'
+    ]
+    return any(m in col for m in termos_monetarios_diretos)
 
 
 def obter_prefixo_coluna(nome_coluna):
@@ -57,9 +53,7 @@ def obter_prefixo_coluna(nome_coluna):
 
 def formatar_valor(valor, prefixo=None, nome_coluna=None):
     """
-    Formata valores monetários ou numéricos no padrão brasileiro.
-    Se nome_coluna for informado e prefixo for None, detecta automaticamente se é monetário ('R$ ') ou numérico comum ('').
-    Se nem prefixo nem nome_coluna forem fornecidos, o padrão é sem prefixo ('') para evitar rotular dados gerais como R$.
+    Formata valores monetários ou numéricos no padrão brasileiro (PT-BR).
     """
     if valor is None or pd.isna(valor):
         return "N/A"
@@ -83,7 +77,6 @@ def formatar_valor(valor, prefixo=None, nome_coluna=None):
         texto = f"{prefixo}{sinal}{val_abs:,.2f}" if (val_abs % 1 != 0) else f"{prefixo}{sinal}{val_abs:,.0f}"
         return texto.replace(",", "X").replace(".", ",").replace("X", ".")
     else:
-        # Se for inteiro exato e sem prefixo monetário (ex: idade 16), formata como inteiro
         if val_abs.is_integer() and not prefixo:
             return f"{sinal}{int(val_abs)}"
         texto = f"{prefixo}{sinal}{val_abs:.2f}"
@@ -103,7 +96,7 @@ def calcular_estatisticas_resumo(serie):
 
     media = float(s_clean.mean())
     desvio = float(s_clean.std(ddof=1)) if n > 1 else 0.0
-    coef_var = float((desvio / media * 100)) if media != 0 else 0.0
+    coef_var = float((desvio / abs(media) * 100)) if media != 0 else 0.0
     mediana = float(s_clean.median())
     minimo = float(s_clean.min())
     maximo = float(s_clean.max())
@@ -148,7 +141,6 @@ def calcular_estatisticas_resumo(serie):
 def classificar_quartis_outliers(serie):
     """
     Classifica cada elemento da série nas faixas de quartis e outliers (critério IQR).
-    Retorna uma Series de categorias com a respectiva classificação.
     """
     s_clean = pd.to_numeric(serie, errors="coerce").dropna()
     if len(s_clean) == 0:
@@ -182,9 +174,6 @@ def treinar_regressao_linear(X, y):
     """
     Ajusta modelo LinearRegression sobre X e y com validação de dados ausentes,
     tamanho mínimo amostral e variância zero.
-
-    Retorna:
-        dict com modelo, métricas (r2, mae, rmse), coeficientes e arrays limpos.
     """
     X_arr = np.asarray(X, dtype=float)
     y_arr = np.asarray(y, dtype=float)
@@ -197,9 +186,10 @@ def treinar_regressao_linear(X, y):
             f"Dimensões incompatíveis: X tem {len(X_arr)} itens e y tem {len(y_arr)} itens."
         )
 
-    # Filtragem de NaNs e infinitos
-    mask_valida = ~(np.isnan(X_arr).any(axis=1) | np.isinf(X_arr).any(axis=1) |
-                    np.isnan(y_arr) | np.isinf(y_arr))
+    mask_valida = ~(
+        np.isnan(X_arr).any(axis=1) | np.isinf(X_arr).any(axis=1) |
+        np.isnan(y_arr) | np.isinf(y_arr)
+    )
 
     X_clean = X_arr[mask_valida]
     y_clean = y_arr[mask_valida]
@@ -209,7 +199,6 @@ def treinar_regressao_linear(X, y):
             "Dados insuficientes para regressão linear. São necessárias pelo menos 3 observações válidas."
         )
 
-    # Validação de variância zero na variável preditora
     if np.all(X_clean == X_clean[0]):
         raise ValueError(
             "A variável preditora (X) possui variância zero (todos os valores são idênticos). "
@@ -242,20 +231,28 @@ def treinar_regressao_linear(X, y):
     }
 
 
+def converter_serie_temporal_segura(serie_tempo):
+    """
+    Converte uma série em datetime de forma inteligente.
+    Se detectar números inteiros no intervalo de anos (1800 a 2200),
+    converte para YYYY-01-01 em vez de nanossegundos Unix (1970).
+    """
+    if pd.api.types.is_datetime64_any_dtype(serie_tempo):
+        return serie_tempo
+
+    s_num = pd.to_numeric(serie_tempo, errors="coerce")
+    s_num_validos = s_num.dropna()
+
+    if len(s_num_validos) > 0 and s_num_validos.between(1800, 2200).all():
+        anos_str = s_num.fillna(-1).astype(int).astype(str).replace("-1", np.nan)
+        return pd.to_datetime(anos_str + "-01-01", errors="coerce")
+
+    return pd.to_datetime(serie_tempo, errors="coerce")
+
+
 def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", agregacao="sum"):
     """
     Executa agregação temporal histórica e regressão linear com projeção para N períodos futuros.
-
-    Parâmetros:
-        df: DataFrame com os dados
-        col_data: Nome da coluna temporal
-        col_valor: Nome da coluna numérica a ser projetada
-        n_periodos: Quantidade de períodos futuros a prever (padrão: 6)
-        freq: Frequência ('M' para mensal, 'D' para diário, 'Q' para trimestral, 'Y' para anual)
-        agregacao: 'sum' ou 'mean'
-
-    Retorna:
-        dict com df_historico, df_previsoes, métricas do modelo e resumo executivo.
     """
     if df is None or df.empty:
         raise ValueError("O DataFrame fornecido está vazio.")
@@ -266,9 +263,10 @@ def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", 
     if col_valor not in df.columns:
         raise ValueError(f"Coluna de valor '{col_valor}' não encontrada no dataset.")
 
-    # Converte coluna de data e valor com tratamento robusto
+    datas_convertidas = converter_serie_temporal_segura(df[col_data])
+
     df_temp = pd.DataFrame({
-        "data_raw": pd.to_datetime(df[col_data], errors="coerce"),
+        "data_raw": datas_convertidas,
         "valor_raw": pd.to_numeric(df[col_valor], errors="coerce"),
     }).dropna()
 
@@ -278,51 +276,54 @@ def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", 
             "São necessárias pelo menos 3 linhas com datas e valores válidos."
         )
 
-    # Cria agrupamento por período
     freq_upper = freq.upper()
-    if freq_upper in ("M", "MONTH", "MÊS", "MES"):
+    if freq_upper in ("M", "MS", "MONTH", "MÊS", "MES"):
         df_temp["periodo"] = df_temp["data_raw"].dt.to_period("M")
         date_offset = pd.DateOffset(months=1)
         date_freq = "MS"
+        formato_data = "%b/%Y"
     elif freq_upper in ("D", "DAY", "DIA"):
         df_temp["periodo"] = df_temp["data_raw"].dt.to_period("D")
         date_offset = pd.DateOffset(days=1)
         date_freq = "D"
-    elif freq_upper in ("Q", "QUARTER", "TRIMESTRE"):
+        formato_data = "%d/%m/%Y"
+    elif freq_upper in ("Q", "QS", "QUARTER", "TRIMESTRE"):
         df_temp["periodo"] = df_temp["data_raw"].dt.to_period("Q")
         date_offset = pd.DateOffset(months=3)
         date_freq = "QS"
-    elif freq_upper in ("Y", "YEAR", "ANO"):
+        formato_data = "%b/%Y"
+    elif freq_upper in ("Y", "YS", "YEAR", "ANO"):
         df_temp["periodo"] = df_temp["data_raw"].dt.to_period("Y")
         date_offset = pd.DateOffset(years=1)
         date_freq = "YS"
+        formato_data = "%Y"
     else:
         df_temp["periodo"] = df_temp["data_raw"].dt.to_period("M")
         date_offset = pd.DateOffset(months=1)
         date_freq = "MS"
+        formato_data = "%b/%Y"
 
-    # Agregação
     agg_func = "sum" if agregacao == "sum" else "mean"
     df_agrupado = df_temp.groupby("periodo")["valor_raw"].agg(agg_func).reset_index()
     df_agrupado = df_agrupado.sort_values("periodo").reset_index(drop=True)
 
+    # Caso o usuário tenha escolhido Mensal/Diário mas a coluna só possua anos inteiros (1 dia por ano),
+    # re-agrupa automaticamente em Anual se necessário
     if len(df_agrupado) < 3:
         raise ValueError(
-            f"O agrupamento temporal gerou apenas {len(df_agrupado)} períodos. "
-            "São necessários pelo menos 3 períodos temporais distintos para projeção estatística."
+            f"O agrupamento temporal gerou apenas {len(df_agrupado)} período(s). "
+            "São necessários pelo menos 3 períodos distintos para projeção estatística."
         )
 
     df_agrupado["data"] = df_agrupado["periodo"].dt.to_timestamp()
     df_agrupado["indice"] = range(len(df_agrupado))
     df_agrupado.rename(columns={"valor_raw": col_valor}, inplace=True)
 
-    # Treina regressão
     X = df_agrupado[["indice"]].values
     y = df_agrupado[col_valor].values
     reg_res = treinar_regressao_linear(X, y)
     df_agrupado["tendencia"] = reg_res["y_pred"]
 
-    # Projeção futura
     n_periodos = max(1, int(n_periodos))
     ultimo_indice = int(df_agrupado["indice"].max())
     indices_futuros = np.arange(ultimo_indice + 1, ultimo_indice + 1 + n_periodos).reshape(-1, 1)
@@ -340,14 +341,18 @@ def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", 
         "valor_previsto": previsoes_futuras,
         "indice": indices_futuros.flatten()
     })
-    df_previsoes["crescimento_pct"] = df_previsoes["valor_previsto"].pct_change() * 100
 
-    # Resumo
+    ultimo_historico = float(df_agrupado[col_valor].iloc[-1])
+    df_previsoes["crescimento_pct"] = df_previsoes["valor_previsto"].pct_change() * 100
+    if ultimo_historico != 0:
+        df_previsoes.loc[0, "crescimento_pct"] = (
+            (df_previsoes.loc[0, "valor_previsto"] - ultimo_historico) / abs(ultimo_historico)
+        ) * 100
+
     total_previsto = float(df_previsoes["valor_previsto"].sum())
     media_mensal = float(df_previsoes["valor_previsto"].mean())
-    ultimo_historico = float(df_agrupado[col_valor].iloc[-1])
     crescimento_total = float(
-        ((df_previsoes["valor_previsto"].iloc[-1] / ultimo_historico) - 1) * 100
+        ((df_previsoes["valor_previsto"].iloc[-1] - ultimo_historico) / abs(ultimo_historico)) * 100
     ) if ultimo_historico != 0 else 0.0
 
     return {
@@ -366,6 +371,7 @@ def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", 
         "col_data": col_data,
         "col_valor": col_valor,
         "n_periodos": n_periodos,
+        "formato_data": formato_data,
     }
 
 
