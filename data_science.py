@@ -135,6 +135,37 @@ def formatar_decimal(valor, casas=2):
     return _trocar_separadores(f"{float(valor):,.{casas}f}")
 
 
+def formatar_r2(r2, casas_pct=1, casas_dec=3, hibrido=True):
+    """
+    Formata o Coeficiente de Determinação (R²) diretamente em porcentagem
+    ou no formato híbrido executivo '97,1% (0,971)' (padrão).
+    """
+    if r2 is None or pd.isna(r2) or np.isinf(r2):
+        return "N/A"
+    val = float(r2)
+    pct_str = formatar_percentual(val * 100.0, casas=casas_pct)
+    if not hibrido:
+        return pct_str
+    dec_str = formatar_decimal(val, casas=casas_dec)
+    return f"{pct_str} ({dec_str})"
+
+
+def interpretar_r2(r2):
+    """Classifica o poder explicativo (R²) em linguagem executiva."""
+    if r2 is None or pd.isna(r2):
+        return "indeterminado"
+    v = float(r2)
+    if v >= 0.85:
+        return "muito alto (ajuste excelente)"
+    if v >= 0.70:
+        return "alto (ajuste forte)"
+    if v >= 0.50:
+        return "moderado"
+    if v >= 0.25:
+        return "baixo"
+    return "muito baixo (alta dispersão)"
+
+
 def formatar_valor(valor, prefixo=None, nome_coluna=None):
     """
     Formata valores monetários ou numéricos no padrão brasileiro (PT-BR).
@@ -679,6 +710,11 @@ def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", 
 
     total_previsto = float(df_previsoes["valor_previsto"].sum())
     media_mensal = float(df_previsoes["valor_previsto"].mean())
+    media_historica = float(np.mean(y))
+    mae_pct_media = float(abs(reg_res["mae"] / media_historica) * 100) if media_historica != 0 else np.nan
+    rmse_pct_media = float(abs(reg_res["rmse"] / media_historica) * 100) if media_historica != 0 else np.nan
+    coef_pct_media = float((reg_res["coef"] / abs(media_historica)) * 100) if media_historica != 0 else np.nan
+
     crescimento_total = float(
         ((df_previsoes["valor_previsto"].iloc[-1] - ultimo_historico) / abs(ultimo_historico)) * 100
     ) if ultimo_historico != 0 else 0.0
@@ -702,6 +738,10 @@ def executar_previsao_temporal(df, col_data, col_valor, n_periodos=6, freq="M", 
         "tendencia_significativa": bool(reg_res["p_valor_coef"] < 0.05) if not pd.isna(reg_res["p_valor_coef"]) else False,
         "total_previsto": total_previsto,
         "media_mensal": media_mensal,
+        "media_historica": media_historica,
+        "mae_pct_media": mae_pct_media,
+        "rmse_pct_media": rmse_pct_media,
+        "coef_pct_media": coef_pct_media,
         "ultimo_historico": ultimo_historico,
         "crescimento_total": crescimento_total,
         "crescimento_tendencia": crescimento_tendencia,
@@ -747,6 +787,9 @@ def executar_regressao_bivariada(df, col_x, col_y):
     reg_res = treinar_regressao_linear(X, y)
     df_clean["y_pred"] = reg_res["y_pred"]
     corr = calcular_correlacao(df_clean[col_x], df_clean[col_y])
+    media_y = float(np.mean(y))
+    mae_pct_media = float(abs(reg_res["mae"] / media_y) * 100) if media_y != 0 else np.nan
+    rmse_pct_media = float(abs(reg_res["rmse"] / media_y) * 100) if media_y != 0 else np.nan
 
     return {
         "df_clean": df_clean,
@@ -756,6 +799,9 @@ def executar_regressao_bivariada(df, col_x, col_y):
         "r2": reg_res["r2"],
         "mae": reg_res["mae"],
         "rmse": reg_res["rmse"],
+        "media_y": media_y,
+        "mae_pct_media": mae_pct_media,
+        "rmse_pct_media": rmse_pct_media,
         "coef": reg_res["coef"],
         "intercept": reg_res["intercept"],
         "p_valor_coef": reg_res["p_valor_coef"],
