@@ -25,6 +25,8 @@ from data_science import (
     formatar_inteiro,
     formatar_percentual,
     formatar_decimal,
+    formatar_r2,
+    interpretar_r2,
     formatar_periodo,
     eh_coluna_monetaria,
     eh_coluna_identificador,
@@ -490,14 +492,15 @@ def construir_perfil_dados(df, col_num=None, col_cat=None, col_data=None, max_ca
     if col_num:
         partes.append("\n[CORRELACOES MAIS FORTES] (Pearson; p<0,05 = estatisticamente significativa)")
         for p in ranking_correlacoes(df, col_num[:15], top=6):
+            r2_par = p['r'] ** 2
             partes.append(f"- {p['var_1']} x {p['var_2']}: r={p['r']:.3f} ({p['interpretacao']}), "
-                          f"p={p['p_valor']:.4f}, n={p['n']}")
+                          f"R²={r2_par * 100:.1f}% ({r2_par:.3f}), p={p['p_valor']:.4f}, n={p['n']}")
 
     metrica = _escolher_metrica_principal(df, col_num)
     cat, eta2 = _escolher_categoria_principal(df, col_cat, metrica)
     if metrica and cat:
         res = resumir_por_categoria(df, cat, metrica, 'mean')
-        partes.append(f"\n[RESUMO POR CATEGORIA] {metrica} por {cat} (eta²={eta2:.3f})" if eta2 is not None
+        partes.append(f"\n[RESUMO POR CATEGORIA] {metrica} por {cat} (eta²={eta2 * 100:.1f}% ({eta2:.3f}))" if eta2 is not None
                       else f"\n[RESUMO POR CATEGORIA] {metrica} por {cat}")
         for _, r in res.head(max_cats).iterrows():
             partes.append(f"- {r[cat]}: n={int(r['registros'])}, media={r['media']:.2f}, "
@@ -555,19 +558,20 @@ def gerar_parecer_estatistico_local(df, tipo_analise="Automático (Geral)", perg
             sig = "estatisticamente significativa (p < 0,05)" if p0['significativa'] else "**não** significativa estatisticamente (p ≥ 0,05)"
             diag_correlacao = (
                 f"A relação mais forte ocorre entre **`{p0['var_1']}`** e **`{p0['var_2']}`**: "
-                f"r = {formatar_decimal(p0['r'], 3)}, correlação **{p0['interpretacao']}**, {sig}, "
-                f"com {formatar_inteiro(p0['n'])} pares válidos."
+                f"r = {formatar_decimal(p0['r'], 3)} (R² = **{formatar_r2(p0['r'] ** 2)}** de variação compartilhada), "
+                f"correlação **{p0['interpretacao']}**, {sig}, com {formatar_inteiro(p0['n'])} pares válidos."
             )
             if len(pares) > 1:
                 outros = "; ".join(
-                    f"`{p['var_1']}` × `{p['var_2']}` (r = {formatar_decimal(p['r'], 3)}, {p['interpretacao']})"
+                    f"`{p['var_1']}` × `{p['var_2']}` (r = {formatar_decimal(p['r'], 3)} | R² = {formatar_percentual((p['r'] ** 2) * 100, 1)}, {p['interpretacao']})"
                     for p in pares[1:]
                 )
                 diag_correlacao += f" Também se destacam: {outros}."
             diag_correlacao += " *Correlação indica associação, não necessariamente causa e efeito.*"
             if abs(p0['r']) >= 0.5 and p0['significativa']:
                 recomendacoes.append(
-                    f"**Investigar a relação `{p0['var_1']}` × `{p0['var_2']}`:** a associação é {p0['interpretacao']}. "
+                    f"**Investigar a relação `{p0['var_1']}` × `{p0['var_2']}`:** a associação é {p0['interpretacao']} "
+                    f"(explica {formatar_percentual((p0['r'] ** 2) * 100, 1)} do comportamento). "
                     f"Valide com a área de negócio se há relação de causa antes de usá-la para metas ou previsões "
                     f"(a aba *Ciência de Dados → Regressão Bivariada* quantifica o efeito)."
                 )
@@ -599,7 +603,7 @@ def gerar_parecer_estatistico_local(df, tipo_analise="Automático (Geral)", perg
                 )
             if eta2 is not None:
                 diag_categoria += (
-                    f" A categoria explica {formatar_percentual(eta2 * 100)} da variação de `{metrica}` (η²)"
+                    f" A categoria explica **{formatar_r2(eta2)}** da variação de `{metrica}` (η²)"
                     + (" — efeito relevante." if eta2 >= 0.06 else " — efeito pequeno; os grupos são parecidos entre si.")
                 )
             if min_reg > 1:
@@ -640,7 +644,8 @@ def gerar_parecer_estatistico_local(df, tipo_analise="Automático (Geral)", perg
                 f"Considerando {rp['n_periodos_historicos']} meses de `{col_data[0]}` "
                 f"({formatar_periodo(dh['data'].iloc[0])} a {formatar_periodo(dh['data'].iloc[-1])}), "
                 f"`{metrica}` ({'soma' if agg == 'sum' else 'média'} mensal) apresenta tendência de **{direcao}** de "
-                f"{formatar_valor(abs(rp['coef']), nome_coluna=metrica)} por mês"
+                f"{formatar_valor(abs(rp['coef']), nome_coluna=metrica)} por mês "
+                f"(poder explicativo **R² = {formatar_r2(rp['r2'])}**)"
                 + (" — tendência **estatisticamente significativa**." if rp['tendencia_significativa']
                    else " — porém **não significativa** estatisticamente (oscilação pode ser aleatória).")
             )
@@ -648,7 +653,7 @@ def gerar_parecer_estatistico_local(df, tipo_analise="Automático (Geral)", perg
                 diag_tempo += " O último mês, incompleto, foi desconsiderado no cálculo."
             if rp['tendencia_significativa'] and rp['coef'] < 0:
                 recomendacoes.append(
-                    f"**Alerta de tendência de queda em `{metrica}`:** a redução mensal é consistente. "
+                    f"**Alerta de tendência de queda em `{metrica}`:** a redução mensal é consistente (R² = {formatar_r2(rp['r2'])}). "
                     f"Priorize um plano de ação e acompanhe a projeção na aba *Ciência de Dados*."
                 )
         except Exception:
@@ -677,7 +682,7 @@ def gerar_parecer_estatistico_local(df, tipo_analise="Automático (Geral)", perg
             "e alertas para valores acima do 3º quartil (Q3) das métricas principais."
         )
     recomendacoes.append(
-        "**Acompanhamento preditivo:** revise periodicamente a tendência e o R² na aba *Ciência de Dados & Regressão*."
+        "**Acompanhamento preditivo:** revise periodicamente a tendência e o poder explicativo (R² em %) na aba *Ciência de Dados & Regressão*."
     )
 
     foco_cabecalho = (
@@ -745,7 +750,8 @@ REGRAS_FIDELIDADE = (
     "4. Considere correlações com p >= 0,05 como não significativas.\n"
     "5. Valores monetários em R$ apenas para colunas marcadas como 'monetaria=sim'.\n"
     "6. Use o padrão numérico brasileiro (1.234,56) e escreva em Português do Brasil.\n"
-    "7. Se os dados não permitirem responder algo, diga claramente o que falta.\n\n"
+    "7. Ao citar o Coeficiente de Determinação (R²) ou poder explicativo, apresente SEMPRE em porcentagem ou no formato híbrido executivo, ex.: 97,1% (0,971).\n"
+    "8. Se os dados não permitirem responder algo, diga claramente o que falta.\n\n"
 )
 
 
@@ -1419,8 +1425,13 @@ else:
                         'count': 'Válidos', 'mean': 'Média', 'std': 'Desv. Padrão',
                         'min': 'Mínimo', '25%': 'Q1 (25%)', '50%': 'Mediana', '75%': 'Q3 (75%)', 'max': 'Máximo'
                     })
+                    desc['CV (%)'] = [
+                        round(float(df[c].std() / abs(df[c].mean()) * 100), 1)
+                        if df[c].dropna().mean() != 0 and (df[c].dropna() >= 0).all() else np.nan
+                        for c in col_num
+                    ]
                     desc['Assimetria'] = [df[c].skew() if df[c].dropna().nunique() > 2 else 0.0 for c in col_num]
-                    st.dataframe(desc.round(3), use_container_width=True, height=400)
+                    st.dataframe(desc.round(2), use_container_width=True, height=400)
 
             if total_nulos_tratados > 0:
                 st.markdown("##### 🛠️ Valores Ausentes na Origem por Coluna")
@@ -1457,15 +1468,16 @@ else:
 
                 pares_top = ranking_correlacoes(df, col_num[:15], top=8)
                 if pares_top:
-                    st.markdown("##### 🏆 Pares de Variáveis Mais Correlacionados")
+                    st.markdown("##### 🏆 Pares de Variáveis Mais Correlacionados (com Poder Explicativo R²)")
                     df_pares = pd.DataFrame([{
                         "Variável 1": p["var_1"],
                         "Variável 2": p["var_2"],
-                        "r de Pearson": round(p["r"], 3),
+                        "Correlação (r)": f"{formatar_percentual(p['r'] * 100, 1, sinal=True)} ({formatar_decimal(p['r'], 3)})",
+                        "Poder Explicativo (R²)": formatar_r2(p["r"] ** 2),
                         "Interpretação": p["interpretacao"].capitalize(),
                         "p-valor": f"{p['p_valor']:.4f}",
                         "Significativa (p < 0,05)": "Sim ✅" if p["significativa"] else "Não ⚠️",
-                        "Pares Válidos (n)": p["n"],
+                        "Pares Válidos (n)": formatar_inteiro(p["n"]),
                     } for p in pares_top])
                     st.dataframe(df_pares, use_container_width=True, hide_index=True)
 
@@ -1704,7 +1716,10 @@ else:
                             _trendline = None
 
                         corr_sc = calcular_correlacao(df[var_num], df[var_num2])
-                        r_txt = f" (r = {formatar_decimal(corr_sc['r'], 2)} — {corr_sc['interpretacao']})" if not pd.isna(corr_sc['r']) else ""
+                        r_txt = (
+                            f" (R² = {formatar_percentual((corr_sc['r'] ** 2) * 100, 1)} | r = {formatar_decimal(corr_sc['r'], 2)} — {corr_sc['interpretacao']})"
+                            if not pd.isna(corr_sc['r']) else ""
+                        )
                         df_sc_sample = df.sample(min(3000, len(df)), random_state=42) if len(df) > 3000 else df
                         fig_scatter = px.scatter(
                             df_sc_sample, x=var_num, y=var_num2,
@@ -1977,20 +1992,63 @@ else:
                             st.markdown("---")
                             st.markdown("#### 📈 Qualidade do Ajuste do Modelo (Regressão Linear)")
 
+                            unidade_tempo = {
+                                "Y": "ano", "M": "mês", "Q": "trimestre", "D": "dia", "W": "semana"
+                            }.get(freq_cod, "período")
+                            media_hist_val = rp.get('media_historica', float(df_hist[rp['col_valor']].mean()))
+                            mae_pct = rp.get('mae_pct_media', (abs(rp['mae'] / media_hist_val) * 100 if media_hist_val else np.nan))
+                            rmse_pct = rp.get('rmse_pct_media', (abs(rp['rmse'] / media_hist_val) * 100 if media_hist_val else np.nan))
+                            coef_pct = rp.get('coef_pct_media', ((rp['coef'] / abs(media_hist_val)) * 100 if media_hist_val else np.nan))
+
+                            mae_fmt = formatar_valor(rp['mae'], prefixo=prefixo_res)
+                            rmse_fmt = formatar_valor(rp['rmse'], prefixo=prefixo_res)
+                            media_hist_fmt = formatar_valor(media_hist_val, prefixo=prefixo_res)
+                            coef_fmt = formatar_valor(rp['coef'], prefixo=prefixo_res)
+                            sinal_coef = "+" if rp['coef'] > 0 else ""
+
+                            mae_card_val = f"{mae_fmt} (±{formatar_percentual(mae_pct, 1)})" if (not pd.isna(mae_pct) and len(mae_fmt) <= 8) else mae_fmt
+                            rmse_card_val = f"{rmse_fmt} (±{formatar_percentual(rmse_pct, 1)})" if (not pd.isna(rmse_pct) and len(rmse_fmt) <= 8) else rmse_fmt
+
                             m1, m2, m3, m4 = st.columns(4)
                             with m1:
-                                m1.metric("R² (Determinação)", formatar_decimal(rp['r2'], 3))
-                                sig_txt = "Tendência significativa (p < 0,05)" if rp.get('tendencia_significativa') else "Tendência não significativa (p ≥ 0,05)"
-                                m1.caption(sig_txt)
+                                m1.metric(
+                                    "R² (Determinação)",
+                                    formatar_r2(rp['r2']),
+                                    help="Coeficiente de Determinação (R²): indica a porcentagem do comportamento da métrica que é explicada pelo modelo linear (0% a 100%)."
+                                )
+                                sig_txt = "Tendência significativa (p < 0,05) ✅" if rp.get('tendencia_significativa') else "Tendência não significativa (p ≥ 0,05) ⚠️"
+                                m1.caption(f"{formatar_percentual(rp['r2'] * 100, 1)} do comportamento explicado · {sig_txt}")
                             with m2:
-                                m2.metric("MAE (Erro Médio Absoluto)", formatar_valor(rp['mae'], prefixo=prefixo_res))
-                                m2.caption("Erro médio absoluto nas unidades da métrica")
+                                m2.metric(
+                                    "MAE (Erro Médio Absoluto)",
+                                    mae_card_val,
+                                    help="Erro Médio Absoluto: desvio médio entre os valores reais e a linha de tendência, na mesma unidade da métrica e em % da média histórica."
+                                )
+                                if not pd.isna(mae_pct):
+                                    m2.caption(f"Margem de erro média de ±{formatar_percentual(mae_pct, 1)} sobre a média histórica ({media_hist_fmt})")
+                                else:
+                                    m2.caption("Erro médio absoluto nas unidades da métrica")
                             with m3:
-                                m3.metric("RMSE (Raiz do Erro Médio²)", formatar_valor(rp['rmse'], prefixo=prefixo_res))
-                                m3.caption("Penaliza desvios maiores")
+                                m3.metric(
+                                    "RMSE (Raiz do Erro Médio²)",
+                                    rmse_card_val,
+                                    help="Raiz do Erro Quadrático Médio: dá peso maior a grandes desvios. Quando próximo ao MAE, indica que os erros são regulares e sem picos extremos."
+                                )
+                                rmse_diag = (
+                                    "Erros regulares e sem picos extremos (próximo ao MAE)"
+                                    if (rp['mae'] > 0 and (rp['rmse'] / rp['mae']) <= 1.35)
+                                    else "Sensível a picos de desvio (há oscilações maiores na série)"
+                                )
+                                m3.caption(rmse_diag)
                             with m4:
-                                m4.metric("Coeficiente Angular", f"{formatar_valor(rp['coef'], prefixo=prefixo_res)} / período")
-                                m4.caption(f"Variação média esperada por período ({rp.get('freq_label', freq_sel).lower()})")
+                                m4.metric(
+                                    f"Coeficiente Angular (por {unidade_tempo.capitalize()})",
+                                    f"{sinal_coef}{coef_fmt} / {unidade_tempo}",
+                                    help=f"Inclinação da reta de regressão: representa o ritmo médio de variação a cada {unidade_tempo}."
+                                )
+                                dir_coef = "Queda média" if rp['coef'] < 0 else ("Crescimento médio" if rp['coef'] > 0 else "Estabilidade")
+                                pct_coef_txt = f" ({formatar_percentual(coef_pct, 1, sinal=True)}/{unidade_tempo} sobre a média)" if not pd.isna(coef_pct) else ""
+                                m4.caption(f"{dir_coef} de {formatar_valor(abs(rp['coef']), prefixo=prefixo_res)} por {unidade_tempo}{pct_coef_txt}")
 
                             st.markdown("#### 📊 Histórico, Tendência e Intervalo de Previsão (95%)")
                             fig_prev = go.Figure()
@@ -2042,7 +2100,10 @@ else:
                             ))
 
                             fig_prev.update_layout(
-                                title=f"Análise de Tendência e Previsão de '{rp['col_valor']}' ({rp['n_periodos_historicos']} períodos históricos)",
+                                title=(
+                                    f"Análise de Tendência e Previsão de '{rp['col_valor']}' "
+                                    f"({rp['n_periodos_historicos']} períodos históricos | R² = {formatar_r2(rp['r2'])})"
+                                ),
                                 xaxis_title="Período",
                                 yaxis_title=rp['col_valor'],
                                 template="plotly_dark",
@@ -2109,24 +2170,44 @@ else:
                                 st.plotly_chart(fig_comp, use_container_width=True)
 
                             st.markdown("##### 📌 Resumo Executivo da Previsão")
-                            r1, r2, r3, r4 = st.columns(4)
-                            if rp.get('agregacao') == 'sum':
-                                r1.metric("Soma / Acumulado Previsto", formatar_valor(rp['total_previsto'], prefixo=prefixo_res))
-                            else:
-                                r1.metric("Faixa Prevista (Último Período)",
-                                          f"{formatar_valor(df_prev['limite_inferior'].iloc[-1], prefixo=prefixo_res)} – {formatar_valor(df_prev['limite_superior'].iloc[-1], prefixo=prefixo_res)}")
-                            r2.metric("Média Periódica Prevista", formatar_valor(rp['media_mensal'], prefixo=prefixo_res))
-                            r3.metric("Variação Esperada (Fim vs Histórico)", formatar_percentual(rp['crescimento_total'], 2, sinal=True),
-                                      f"Pela tendência: {formatar_percentual(rp.get('crescimento_tendencia', 0), 2, sinal=True)}", delta_color="off")
-                            r4.metric("Último Ponto Histórico", formatar_valor(rp['ultimo_historico'], prefixo=prefixo_res))
+                            ult_per_hist_txt = formatar_periodo(df_hist['data'].iloc[-1], freq_cod)
+                            ult_per_prev_txt = formatar_periodo(df_prev['data'].iloc[-1], freq_cod)
+                            ult_val_prev_fmt = formatar_valor(df_prev['valor_previsto'].iloc[-1], prefixo=prefixo_res)
 
-                            with st.expander("ℹ️ Detalhes Matemáticos e Interpretação do Modelo"):
+                            r1, r2, r3, r4 = st.columns(4)
+                            with r1:
+                                if rp.get('agregacao') == 'sum':
+                                    r1.metric("Soma / Acumulado Previsto", formatar_valor(rp['total_previsto'], prefixo=prefixo_res))
+                                    r1.caption(f"Total projetado nos próximos {rp['n_periodos']} períodos")
+                                else:
+                                    r1.metric(
+                                        f"Faixa Prevista ({ult_per_prev_txt})",
+                                        f"{formatar_valor(df_prev['limite_inferior'].iloc[-1], prefixo=prefixo_res)} – {formatar_valor(df_prev['limite_superior'].iloc[-1], prefixo=prefixo_res)}"
+                                    )
+                                    r1.caption(f"Intervalo de confiança de 95% no fim do horizonte ({ult_per_prev_txt})")
+                            with r2:
+                                r2.metric("Média Periódica Prevista", formatar_valor(rp['media_mensal'], prefixo=prefixo_res))
+                                r2.caption(f"Média projetada vs {media_hist_fmt} na série histórica")
+                            with r3:
+                                r3.metric(
+                                    "Variação Esperada (Fim vs Histórico)",
+                                    formatar_percentual(rp['crescimento_total'], 2, sinal=True),
+                                    f"Pela tendência: {formatar_percentual(rp.get('crescimento_tendencia', 0), 2, sinal=True)}",
+                                    delta_color="off"
+                                )
+                                r3.caption(f"De {ult_per_hist_txt} até {ult_per_prev_txt}")
+                            with r4:
+                                r4.metric("Último Ponto Histórico", formatar_valor(rp['ultimo_historico'], prefixo=prefixo_res))
+                                r4.caption(f"Real em {ult_per_hist_txt} · Previsto em {ult_per_prev_txt}: {ult_val_prev_fmt}")
+
+                            with st.expander("ℹ️ Detalhes Matemáticos e Interpretação Executiva do Modelo", expanded=True):
                                 p_txt = f"{rp['p_valor_coef']:.4f}" if not pd.isna(rp.get('p_valor_coef')) else "N/A"
                                 st.markdown(f"""
-                                - **Equação da Reta:** `Y = {formatar_decimal(rp['intercept'])} + ({formatar_decimal(rp['coef'])}) × X` *(onde X é o número de períodos desde {formatar_periodo(df_hist['data'].iloc[0], freq_cod)})*
-                                - **Coeficiente Angular:** {formatar_valor(rp['coef'], prefixo=prefixo_res)} por período (p-valor = `{p_txt}`)
-                                - **Coeficiente de Determinação ($R^2$):** {formatar_decimal(rp['r2'], 3)} ({formatar_percentual(rp['r2'] * 100)} da variação histórica é explicada pela tendência linear)
-                                - **Avaliação do Ajuste:** {'✅ Ajuste linear forte (R² ≥ 0,70)' if rp['r2'] >= 0.7 else 'ℹ️ Ajuste moderado (0,50 ≤ R² < 0,70). Use o intervalo de 95% para considerar a incerteza.' if rp['r2'] >= 0.5 else '⚠️ Ajuste fraco (R² < 0,50): os dados oscilam muito ao redor da reta. A previsão indica apenas a direção geral; filtre um segmento específico na barra lateral para maior precisão.'}
+                                - **Poder Explicativo ($R^2$):** **{formatar_r2(rp['r2'])}** — comunica de imediato que **{formatar_percentual(rp['r2'] * 100, 1)}** do comportamento de `{rp['col_valor']}` ao longo do tempo é explicado pelo modelo linear ({interpretar_r2(rp['r2'])}).
+                                - **Ritmo de Variação (Coeficiente Angular):** **{sinal_coef}{coef_fmt} por {unidade_tempo}**{f" ({formatar_percentual(coef_pct, 1, sinal=True)}/{unidade_tempo} em relação à média histórica)" if not pd.isna(coef_pct) else ""} · p-valor = `{p_txt}`.
+                                - **Precisão das Estimativas (MAE e RMSE):** O modelo erra em média **±{mae_fmt}**{f" (apenas **{formatar_percentual(mae_pct, 1)}** da média histórica de {media_hist_fmt})" if not pd.isna(mae_pct) else ""}, com RMSE de **{rmse_fmt}**{f" (±{formatar_percentual(rmse_pct, 1)})" if not pd.isna(rmse_pct) else ""}.
+                                - **Equação da Reta:** `Y = {formatar_decimal(rp['intercept'])} + ({formatar_decimal(rp['coef'])}) × X` *(onde X é o número de períodos desde {formatar_periodo(df_hist['data'].iloc[0], freq_cod)})*.
+                                - **Avaliação do Ajuste:** {'✅ **Ajuste linear forte (R² ≥ 70%):** a tendência histórica é altamente consistente e confiável para projeções.' if rp['r2'] >= 0.7 else 'ℹ️ **Ajuste moderado (50% ≤ R² < 70%):** há tendência clara, mas com oscilações; utilize a faixa do Intervalo de Previsão (95%) para tomada de decisão.' if rp['r2'] >= 0.5 else '⚠️ **Ajuste fraco (R² < 50%):** os dados oscilam fortemente ao redor da reta. A previsão indica apenas a direção geral; filtre um segmento específico na barra lateral para maior precisão.'}
                                 """)
 
                     else:
@@ -2152,19 +2233,49 @@ else:
                             prefixo_rb = obter_prefixo_coluna(rb['col_y'])
                             prefixo_rx = obter_prefixo_coluna(rb['col_x'])
 
+                            media_y_biv = rb.get('media_y', float(df_biv[rb['col_y']].mean()))
+                            mae_biv_pct = rb.get('mae_pct_media', (abs(rb['mae'] / media_y_biv) * 100 if media_y_biv else np.nan))
+                            rmse_biv_pct = rb.get('rmse_pct_media', (abs(rb['rmse'] / media_y_biv) * 100 if media_y_biv else np.nan))
+                            mae_biv_fmt = formatar_valor(rb['mae'], prefixo=prefixo_rb)
+                            rmse_biv_fmt = formatar_valor(rb['rmse'], prefixo=prefixo_rb)
+
+                            mae_biv_card = f"{mae_biv_fmt} (±{formatar_percentual(mae_biv_pct, 1)})" if (not pd.isna(mae_biv_pct) and len(mae_biv_fmt) <= 8) else mae_biv_fmt
+                            rmse_biv_card = f"{rmse_biv_fmt} (±{formatar_percentual(rmse_biv_pct, 1)})" if (not pd.isna(rmse_biv_pct) and len(rmse_biv_fmt) <= 8) else rmse_biv_fmt
+
                             st.markdown("---")
                             b1, b2, b3, b4 = st.columns(4)
-                            b1.metric("R² (Determinação)", formatar_decimal(rb['r2'], 3))
-                            b1.caption(f"r de Pearson = {formatar_decimal(rb.get('r_pearson', 0), 3)} ({rb.get('interpretacao', '')})")
-                            b2.metric("MAE (Erro Médio Absoluto)", formatar_valor(rb['mae'], prefixo=prefixo_rb))
-                            b3.metric("RMSE", formatar_valor(rb['rmse'], prefixo=prefixo_rb))
-                            b4.metric("Inclinação (ΔY por +1 em X)", formatar_decimal(rb['coef'], 4))
-                            b4.caption("Significativa (p < 0,05) ✅" if rb.get('significativa') else "Não significativa (p ≥ 0,05) ⚠️")
+                            with b1:
+                                b1.metric(
+                                    "R² (Determinação)",
+                                    formatar_r2(rb['r2']),
+                                    help="Porcentagem da variação de Y que é explicada diretamente pela variável X."
+                                )
+                                b1.caption(
+                                    f"Explica {formatar_percentual(rb['r2'] * 100, 1)} de Y · "
+                                    f"r = {formatar_percentual(rb.get('r_pearson', 0) * 100, 1, sinal=True)} ({formatar_decimal(rb.get('r_pearson', 0), 3)} — {rb.get('interpretacao', '')})"
+                                )
+                            with b2:
+                                b2.metric("MAE (Erro Médio Absoluto)", mae_biv_card)
+                                b2.caption(
+                                    f"Erro médio de ±{formatar_percentual(mae_biv_pct, 1)} sobre a média de Y"
+                                    if not pd.isna(mae_biv_pct) else "Erro médio absoluto nas unidades de Y"
+                                )
+                            with b3:
+                                b3.metric("RMSE (Raiz do Erro Médio²)", rmse_biv_card)
+                                b3.caption(
+                                    "Erros regulares sem picos extremos"
+                                    if (rb['mae'] > 0 and (rb['rmse'] / rb['mae']) <= 1.35)
+                                    else "Penaliza desvios maiores na relação X → Y"
+                                )
+                            with b4:
+                                sinal_biv = "+" if rb['coef'] > 0 else ""
+                                b4.metric("Inclinação (ΔY por +1 em X)", f"{sinal_biv}{formatar_decimal(rb['coef'], 4)}")
+                                b4.caption("Significativa (p < 0,05) ✅" if rb.get('significativa') else "Não significativa (p ≥ 0,05) ⚠️")
 
                             df_biv_plot = df_biv.sample(min(3000, len(df_biv)), random_state=42) if len(df_biv) > 3000 else df_biv
                             fig_biv = px.scatter(
                                 df_biv_plot, x=rb['col_x'], y=rb['col_y'],
-                                title=f"Dispersão com Linha de Regressão: {rb['col_y']} vs {rb['col_x']}",
+                                title=f"Dispersão com Linha de Regressão: {rb['col_y']} vs {rb['col_x']} (R² = {formatar_r2(rb['r2'])})",
                                 template="plotly_dark",
                                 opacity=0.65
                             )
@@ -2180,11 +2291,12 @@ else:
 
                             direcao_biv = "aumenta" if rb['coef'] > 0 else "diminui"
                             st.info(
-                                f"**Interpretação prática:** a cada **+1** unidade em `{rb['col_x']}`, "
-                                f"`{rb['col_y']}` {direcao_biv} em média **{formatar_valor(abs(rb['coef']), prefixo=prefixo_rb)}** "
+                                f"**Interpretação Executiva:** O modelo explica **{formatar_r2(rb['r2'])}** do comportamento de `{rb['col_y']}`. "
+                                f"A cada **+1** unidade em `{rb['col_x']}`, `{rb['col_y']}` {direcao_biv} em média "
+                                f"**{formatar_valor(abs(rb['coef']), prefixo=prefixo_rb)}** "
                                 f"(equação: `{rb['col_y']} = {formatar_decimal(rb['intercept'], 4)} + ({formatar_decimal(rb['coef'], 4)}) × {rb['col_x']}`, "
                                 f"n = {formatar_inteiro(rb['n_obs'])} pares válidos). "
-                                + ("A relação é estatisticamente significativa." if rb.get('significativa')
+                                + ("A relação é **estatisticamente significativa (p < 0,05)**." if rb.get('significativa')
                                    else "Atenção: a relação **não** é estatisticamente significativa (p ≥ 0,05).")
                             )
 
@@ -2204,8 +2316,16 @@ else:
                         cv_val = estat_metric['coef_variacao']
                         with e1:
                             if estat_metric['cv_valido']:
-                                e1.metric("📊 Coef. de Variação (CV)", formatar_percentual(cv_val, 2))
-                                e1.caption("Alta (>50%)" if cv_val > 50 else "Moderada (>30%)" if cv_val > 30 else "Baixa (≤30%)")
+                                e1.metric(
+                                    "📊 Coef. de Variação (CV)",
+                                    formatar_percentual(cv_val, 1),
+                                    help="Mede a dispersão relativa (Desvio Padrão ÷ Média). Até 30% indica dados homogêneos; acima de 50% indica alta volatilidade."
+                                )
+                                e1.caption(
+                                    f"Dispersão alta (>50%) · Desv. Padrão: {formatar_valor(estat_metric['desvio_padrao'], prefixo=prefixo_estat)}" if cv_val > 50
+                                    else f"Dispersão moderada (30%–50%) · Desv. Padrão: {formatar_valor(estat_metric['desvio_padrao'], prefixo=prefixo_estat)}" if cv_val > 30
+                                    else f"Dispersão baixa (≤30%: dados homogêneos) · Desv. Padrão: {formatar_valor(estat_metric['desvio_padrao'], prefixo=prefixo_estat)}"
+                                )
                             else:
                                 e1.metric("📊 Desvio Padrão", formatar_valor(estat_metric['desvio_padrao'], prefixo=prefixo_estat))
                                 e1.caption("CV não se aplica (métrica com valores ≤ 0)")
@@ -2215,26 +2335,40 @@ else:
                             if col_outras:
                                 col_corr_sel = st.selectbox("Comparar correlação com:", col_outras, key="sb_corr_metric")
                                 corr_res = calcular_correlacao(df[col_estat_sel], df[col_corr_sel])
+                                r_val = corr_res['r']
                                 e2.metric(
                                     f"🔗 Correlação com '{col_corr_sel}'",
-                                    formatar_decimal(corr_res['r'], 3) if not pd.isna(corr_res['r']) else "N/A"
+                                    f"{formatar_percentual(r_val * 100, 1, sinal=True)} ({formatar_decimal(r_val, 3)})" if not pd.isna(r_val) else "N/A",
+                                    help="Correlação Linear de Pearson (r de -100% a +100%) e poder explicativo compartilhado (R²)."
                                 )
-                                e2.caption(f"Pearson: {corr_res['interpretacao']} ({'p < 0,05' if corr_res['significativa'] else 'não signif.'})")
+                                r2_corr_txt = f"R² = {formatar_percentual((r_val ** 2) * 100, 1)} explicados · " if not pd.isna(r_val) else ""
+                                e2.caption(f"{r2_corr_txt}Pearson {corr_res['interpretacao']} ({'p < 0,05 ✅' if corr_res['significativa'] else 'não signif. ⚠️'})")
                             else:
-                                e2.metric("🔗 Correlação", "1,000")
+                                e2.metric("🔗 Correlação", "100,0% (1,000)")
                                 e2.caption("Correlação de Pearson")
 
                         with e3:
-                            # Corrigido: usa o critério estatístico real de outliers (Tukey/IQR), não o percentil 95 fixo de 5%
-                            e3.metric("⚠️ Outliers (Critério IQR)", formatar_percentual(estat_metric['outliers_iqr_pct'], 1))
+                            # Critério estatístico real de outliers (Tukey/IQR), exibindo % e total de registros
+                            e3.metric(
+                                "⚠️ Outliers (Critério IQR)",
+                                f"{formatar_percentual(estat_metric['outliers_iqr_pct'], 1)} ({formatar_inteiro(estat_metric['outliers_iqr_count'])})",
+                                help="Porcentagem e quantidade de registros fora da faixa normal de Tukey (abaixo de Q1 − 1,5×IQR ou acima de Q3 + 1,5×IQR)."
+                            )
                             e3.caption(
-                                f"{formatar_inteiro(estat_metric['outliers_iqr_count'])} registros fora de Q1−1,5×IQR a Q3+1,5×IQR "
-                                f"(95º percentil = {formatar_valor(estat_metric['p95'], prefixo=prefixo_estat)})"
+                                f"Faixa normal: {formatar_valor(estat_metric['limite_inferior'], prefixo=prefixo_estat)} a {formatar_valor(estat_metric['limite_superior'], prefixo=prefixo_estat)} "
+                                f"· 95º perc.: {formatar_valor(estat_metric['p95'], prefixo=prefixo_estat)}"
                             )
 
                         with e4:
-                            e4.metric("📈 Mediana (Valor Típico)", formatar_valor(estat_metric['mediana'], prefixo=prefixo_estat))
-                            e4.caption(f"Média: {formatar_valor(estat_metric['media'], prefixo=prefixo_estat)}")
+                            e4.metric(
+                                "📈 Mediana (Valor Típico)",
+                                formatar_valor(estat_metric['mediana'], prefixo=prefixo_estat),
+                                help="Valor central (50% dos dados). Diferente da média, a mediana não é distorcida por valores extremos."
+                            )
+                            e4.caption(
+                                f"Média: {formatar_valor(estat_metric['media'], prefixo=prefixo_estat)} · "
+                                f"Mín–Máx: {formatar_valor(estat_metric['minimo'], prefixo=prefixo_estat)} a {formatar_valor(estat_metric['maximo'], prefixo=prefixo_estat)}"
+                            )
 
                         st.markdown("---")
 
