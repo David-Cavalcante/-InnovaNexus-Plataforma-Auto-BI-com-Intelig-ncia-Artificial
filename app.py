@@ -48,7 +48,7 @@ from data_science import (
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="InnovaNexus - Insights & Dashboards com IA",
-    page_icon="🚀",
+    page_icon="💻",
     layout="wide"
 )
 
@@ -733,7 +733,7 @@ Base analisada: **{formatar_inteiro(n_linhas)} registros** distribuídos em **{n
 
 ---
 
-## 🚀 3. Ações Prescritivas para a Gestão
+## 💻 3. Ações Prescritivas para a Gestão
 
 {texto_recs}
 """
@@ -1129,7 +1129,7 @@ def gerar_insights_ia(motor, api_key, df_info_str, df_describe_str, df_head_str,
 if not st.session_state['autenticado']:
     col_centered = st.columns([1, 2, 1])
     with col_centered[1]:
-        st.markdown("## 🚀 InnovaNexus")
+        st.markdown("## 💻 InnovaNexus")
         st.subheader("Portal de Acesso Executivo")
         with st.form("form_login"):
             usuario_input = st.text_input("Utilizador", value="admin")
@@ -1142,7 +1142,7 @@ if not st.session_state['autenticado']:
 # APLICAÇÃO PRINCIPAL
 # ---------------------------------------------------------
 else:
-    st.title("🚀 InnovaNexus: Insights & Dashboards com IA")
+    st.title("💻 InnovaNexus: Insights & Dashboards com IA")
 
     # ── SIDEBAR ────────────────────────────────────────────────────────────────
     st.sidebar.header("👤 Sessão do Utilizador")
